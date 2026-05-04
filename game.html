@@ -1,0 +1,1737 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>3D Dungeon Shooter - Roguelite</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #000; font-family: 'Courier New', Courier, monospace; user-select: none; }
+        #game-canvas { display: block; width: 100vw; height: 100vh; }
+        .ui-layer { position: absolute; inset: 0; pointer-events: none; }
+        .interactive { pointer-events: auto; }
+
+        /* Pixel-art style UI elements */
+        .pixel-box {
+            background: rgba(40, 40, 40, 0.85);
+            border: 4px solid #5a5a5a;
+            border-radius: 4px;
+            box-shadow: inset 0 0 0 2px #222, 0 4px 6px rgba(0,0,0,0.5);
+            image-rendering: pixelated;
+        }
+
+        #minimap-container {
+            width: 160px;
+            height: 160px;
+            background: rgba(20, 20, 20, 0.9);
+        }
+
+        /* Stat Bars */
+        .stat-bar-bg { width: 100%; height: 18px; background: rgba(20, 20, 20, 0.8); border: 2px solid #000; position: relative; margin-bottom: 4px; border-radius: 4px; box-shadow: 0 2px 4px rgba(0,0,0,0.5); }
+        .stat-bar-fill { height: 100%; transition: width 0.2s; }
+        .stat-text { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: white; font-size: 11px; font-weight: bold; text-shadow: 1px 1px 0 #000; }
+
+        .health-fill { background: #e53e3e; }
+        .armor-fill { background: #a0aec0; }
+        .energy-fill { background: #3182ce; }
+
+        /* Weapon UI */
+        #weapon-ui { bottom: 20px; right: 20px; position: absolute; }
+    </style>
+</head>
+<body>
+
+<!-- 3D Canvas -->
+<canvas id="game-canvas"></canvas>
+
+<!-- UI Overlay -->
+<div class="ui-layer flex justify-between p-4">
+
+    <!-- Top Left: Stats -->
+    <div class="inline-flex flex-col gap-2 w-48 drop-shadow-[0_2px_4px_rgba(0,0,0,0.9)] mt-1 ml-1">
+        <!-- Health -->
+        <div class="flex items-center gap-2">
+            <svg class="w-5 h-5 text-red-500 flex-shrink-0 drop-shadow-md" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M3.172 5.172a4 4 0 015.656 0L10 6.343l1.172-1.171a4 4 0 115.656 5.656L10 17.657l-6.828-6.829a4 4 0 010-5.656z" clip-rule="evenodd" /></svg>
+            <div class="stat-bar-bg flex-grow">
+                <div id="health-fill" class="stat-bar-fill health-fill" style="width: 100%;"></div>
+                <div id="health-text" class="stat-text">6 / 6</div>
+            </div>
+        </div>
+        <!-- Armor -->
+        <div class="flex items-center gap-2">
+            <svg class="w-5 h-5 text-gray-400 flex-shrink-0 drop-shadow-md" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M2.166 4.999A11.954 11.954 0 0010 1.944 11.954 11.954 0 0017.834 5c.11.65.166 1.32.166 2.001 0 5.225-3.34 9.67-8 11.317C5.34 16.67 2 12.225 2 7c0-.682.057-1.35.166-2.001zm11.541 3.708a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd" /></svg>
+            <div class="stat-bar-bg flex-grow">
+                <div id="armor-fill" class="stat-bar-fill armor-fill" style="width: 100%;"></div>
+                <div id="armor-text" class="stat-text">5 / 5</div>
+            </div>
+        </div>
+        <!-- Energy -->
+        <div class="flex items-center gap-2">
+            <svg class="w-5 h-5 text-blue-500 flex-shrink-0 drop-shadow-md" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M11.3 1.046A1 1 0 0112 2v5h4a1 1 0 01.82 1.573l-7 10A1 1 0 018 18v-5H4a1 1 0 01-.82-1.573l7-10a1 1 0 011.12-.381z" clip-rule="evenodd" /></svg>
+            <div class="stat-bar-bg flex-grow">
+                <div id="energy-fill" class="stat-bar-fill energy-fill" style="width: 100%;"></div>
+                <div id="energy-text" class="stat-text">200 / 200</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Top Right: Minimap & Coins & Pause -->
+    <div class="flex flex-col items-end gap-2 interactive">
+        <div class="flex gap-2">
+            <button id="pause-btn" class="pixel-box p-1 px-3 text-white hover:bg-gray-700 transition-colors shadow-md font-bold">
+                <svg class="w-6 h-6 inline-block" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M10 9v6m4-6v6m7-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg> ESC
+            </button>
+            <div class="pixel-box p-1 flex items-center gap-2 text-yellow-400 font-bold text-lg px-3 justify-center shadow-md">
+                <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20"><path d="M8.433 7.418c.155-.103.346-.196.567-.267v1.698a2.305 2.305 0 01-.567-.267C8.07 8.34 8 8.114 8 8c0-.114.07-.34.433-.582zM11 12.849v-1.698c.22.071.412.164.567.267.364.243.433.468.433.582 0 .114-.07.34-.433.582a2.305 2.305 0 01-.567.267z" /><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-13a1 1 0 10-2 0v.092a4.535 4.535 0 00-1.676.662C6.602 6.234 6 7.009 6 8c0 .99.602 1.765 1.324 2.246.48.32 1.054.545 1.676.662v1.941c-.391-.127-.68-.317-.843-.504a1 1 0 10-1.51 1.31c.562.649 1.413 1.076 2.353 1.253V15a1 1 0 102 0v-.092a4.535 4.535 0 001.676-.662C13.398 13.766 14 12.991 14 12c0-.99-.602-1.765-1.324-2.246A4.535 4.535 0 0011 9.092V7.151c.391.127.68.317.843.504a1 1 0 101.511-1.31c-.563-.649-1.413-1.076-2.354-1.253V5z" clip-rule="evenodd" /></svg>
+                <span id="coin-text">0</span>
+            </div>
+        </div>
+
+        <div id="minimap-container" class="pixel-box relative shadow-md pointer-events-none">
+            <canvas id="minimap" width="160" height="160" class="w-full h-full"></canvas>
+        </div>
+        <div class="pixel-box px-3 py-1 text-white font-bold text-center shadow-md pointer-events-none">
+            <div id="level-display" class="text-yellow-400 text-sm">1 - 1</div>
+        </div>
+    </div>
+
+    <!-- Center Prompts -->
+    <div class="absolute inset-0 flex flex-col items-center justify-center pointer-events-none z-10" style="top: 60%">
+        <div id="room-alert" class="hidden bg-red-600 text-white px-8 py-2 border-4 border-red-900 rounded font-bold text-xl animate-pulse shadow-lg mb-4"></div>
+        <div id="interaction-prompt" class="hidden bg-yellow-500 text-black px-6 py-2 border-4 border-yellow-700 rounded font-bold text-lg animate-bounce shadow-lg flex flex-col items-center text-center gap-1">
+            <span id="prompt-main">Press [E] to Interact</span>
+            <span id="prompt-sub" class="text-sm font-normal text-yellow-900"></span>
+        </div>
+    </div>
+
+    <!-- Bottom Right: Weapon -->
+    <div id="weapon-ui" class="pixel-box p-3 flex items-center gap-3">
+        <div class="flex flex-col items-end text-white">
+            <div id="weapon-cost" class="text-blue-400 text-sm font-bold flex items-center gap-1">
+                0 <svg class="w-3 h-3 inline pb-0.5" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M11.3 1.046A1 1 0 0112 2v5h4a1 1 0 01.82 1.573l-7 10A1 1 0 018 18v-5H4a1 1 0 01-.82-1.573l7-10a1 1 0 011.12-.381z" clip-rule="evenodd" /></svg>
+            </div>
+            <div id="weapon-name" class="font-bold text-lg">Pistol</div>
+        </div>
+        <div class="w-16 h-16 bg-gray-800 border-2 border-gray-600 rounded flex items-center justify-center text-4xl" id="weapon-icon">
+            <!-- SVG injected via JS -->
+        </div>
+    </div>
+</div>
+
+<!-- Menus -->
+<div id="main-menu" class="absolute inset-0 bg-gray-900 flex flex-col items-center justify-center interactive z-50">
+    <h1 class="text-5xl md:text-7xl font-black text-white mb-2 text-center" style="text-shadow: 4px 4px 0 #555;">SOUL DUNGEON</h1>
+    <p class="text-gray-400 mb-8 text-xl font-bold">Expanded Arsenal Edition</p>
+
+    <div class="pixel-box p-6 mb-8 max-w-md w-full">
+        <ul class="text-white space-y-3 font-bold text-lg">
+            <li><kbd class="text-yellow-400">WASD</kbd> - Move</li>
+            <li><kbd class="text-yellow-400">Mouse</kbd> - Aim & Shoot</li>
+            <li><kbd class="text-yellow-400">E</kbd> - Interact</li>
+            <li><kbd class="text-yellow-400">ESC</kbd> - Pause Game</li>
+            <li><span class="text-red-400">Clear rooms</span> to open doors!</li>
+        </ul>
+    </div>
+
+    <button id="start-btn" class="px-8 py-4 bg-yellow-500 hover:bg-yellow-400 text-black border-4 border-yellow-700 font-bold rounded text-2xl transition-all transform hover:scale-105">
+        ENTER DUNGEON
+    </button>
+</div>
+
+<div id="pause-menu" class="hidden absolute inset-0 bg-black bg-opacity-70 flex flex-col items-center justify-center interactive z-40 backdrop-blur-sm">
+    <h1 class="text-7xl font-black text-white mb-8 tracking-widest drop-shadow-[0_4px_4px_rgba(0,0,0,0.8)]">PAUSED</h1>
+    <button id="resume-btn" class="px-10 py-4 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded text-2xl border-4 border-blue-800 transition-all shadow-lg hover:scale-105">
+        RESUME GAME
+    </button>
+</div>
+
+<div id="game-over-menu" class="hidden absolute inset-0 bg-black bg-opacity-90 flex flex-col items-center justify-center interactive z-40">
+    <h1 class="text-7xl font-black text-red-600 mb-4" style="text-shadow: 4px 4px 0 #440000;">GAME OVER</h1>
+    <button id="restart-btn" class="px-8 py-4 bg-red-700 hover:bg-red-600 text-white border-4 border-red-900 font-bold rounded text-xl transition-all mt-8">
+        TRY AGAIN
+    </button>
+</div>
+
+<script>
+    /**
+     * 3D Dungeon Shooter - Advanced Mechanics & Arsenal Update
+     */
+
+// --- GAME STATE & CONSTANTS ---
+    const STATE = {
+        isRunning: false,
+        isPaused: false,
+        floor: 1,
+        subLevel: 1,
+        maxSubLevels: 5,
+        health: 6, maxHealth: 6,
+        armor: 5, maxArmor: 5, armorRegenTimer: 0,
+        energy: 200, maxEnergy: 200,
+        coins: 0,
+        playerSpeed: 14,
+        activeRoomKey: null
+    };
+
+    // Map Generation Constants
+    const CORRIDOR_WIDTH = 8;
+    const WALL_THICK = 2;
+    const STRIDE = 40;
+
+    const RARITY = {
+        COMMON: { color: 0xffffff, dropWeight: 50 },
+        UNCOMMON: { color: 0x4ade80, dropWeight: 30 },
+        RARE: { color: 0x60a5fa, dropWeight: 15 },
+        EPIC: { color: 0xfacc15, dropWeight: 4 },
+        LEGENDARY: { color: 0xf87171, dropWeight: 1 }
+    };
+
+    // Shared Icons for the 100 Weapon Arsenal
+    const icnGun = `<svg class="w-8 h-8 text-white" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M4 10h12l3-3h-4V5H9v2H4v3z"/><path d="M13 10v6H9v-6"/></svg>`;
+    const icnMelee = `<svg class="w-8 h-8 text-white" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M14.5 17.5L3 6V3h3l11.5 11.5"/><path d="M13 19l6-6"/><path d="M16 16l4 4"/><path d="M19 21l2-2"/></svg>`;
+    const icnStaff = `<svg class="w-8 h-8 text-white" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>`;
+    const icnBow = `<svg class="w-8 h-8 text-white" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8z"/></svg>`;
+    const icnExplode = `<svg class="w-8 h-8 text-white" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M12 2l4 4v14l-4 4-4-4V6l4-4z"/></svg>`;
+    const icnMisc = `<svg class="w-8 h-8 text-white" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 8v8M8 12h8"/></svg>`;
+
+    // Mega Weapon Arsenal
+    const WEAPONS = [
+        // 0: The Starter
+        { id: 0, name: "The Bad Pistol", damage: 2, energy: 0, fireRate: 250, speed: 25, spread: 0.1, count: 1, auto: true, color: 0xaaaaaa, rarity: RARITY.COMMON, icon: icnGun },
+
+        // I. Melee & Close Quarters
+        { id: 1, name: "Meat", damage: 4, energy: 0, fireRate: 150, speed: 40, spread: 0.5, count: 1, auto: true, color: 0xf87171, rarity: RARITY.UNCOMMON, isMelee: true, duration: 0.1, icon: icnMelee },
+        { id: 2, name: "Broadsword", damage: 12, energy: 0, fireRate: 800, speed: 20, spread: 2.0, count: 1, auto: false, color: 0xcccccc, rarity: RARITY.COMMON, isMelee: true, duration: 0.4, scale: 2.0, icon: icnMelee },
+        { id: 3, name: "Katana", damage: 10, energy: 0, fireRate: 400, speed: 30, spread: 0.4, count: 1, auto: true, color: 0xffffff, rarity: RARITY.UNCOMMON, isMelee: true, duration: 0.15, icon: icnMelee },
+        { id: 4, name: "Laser Sword (Red)", damage: 15, energy: 0, fireRate: 500, speed: 30, spread: 0.5, count: 1, auto: false, color: 0xf87171, rarity: RARITY.EPIC, isMelee: true, duration: 0.2, element: 'fire', icon: icnMelee },
+        { id: 5, name: "Laser Sword (Blue)", damage: 12, energy: 0, fireRate: 400, speed: 30, spread: 0.5, count: 1, auto: true, color: 0x60a5fa, rarity: RARITY.EPIC, isMelee: true, duration: 0.2, element: 'freeze', slowsPlayer: false, icon: icnMelee },
+        { id: 6, name: "Laser Sword (Green)", damage: 12, energy: 0, fireRate: 400, speed: 30, spread: 0.5, count: 1, auto: true, color: 0x4ade80, rarity: RARITY.EPIC, isMelee: true, duration: 0.2, element: 'poison', icon: icnMelee },
+        { id: 7, name: "Nunchucks", damage: 4, energy: 0, fireRate: 100, speed: 40, spread: 3.14, count: 2, auto: true, color: 0xfacc15, rarity: RARITY.RARE, isMelee: true, duration: 0.1, icon: icnMelee },
+        { id: 8, name: "Battle Axe", damage: 20, energy: 0, fireRate: 900, speed: 20, spread: 3.14, count: 6, auto: false, color: 0x60a5fa, rarity: RARITY.RARE, isMelee: true, duration: 0.3, icon: icnMelee },
+        { id: 9, name: "Hammer", damage: 18, energy: 0, fireRate: 1000, speed: 15, spread: 1.0, count: 1, auto: false, color: 0xa0aec0, rarity: RARITY.UNCOMMON, isMelee: true, duration: 0.4, element: 'freeze', icon: icnMelee },
+        { id: 10, name: "Stone Hammer", damage: 25, energy: 0, fireRate: 1200, speed: 15, spread: 1.5, count: 1, auto: false, color: 0x718096, rarity: RARITY.RARE, isMelee: true, duration: 0.5, scale: 2.0, explode: true, icon: icnMelee },
+        { id: 11, name: "Mace", damage: 14, energy: 0, fireRate: 700, speed: 25, spread: 0.8, count: 1, auto: false, color: 0x4a5568, rarity: RARITY.UNCOMMON, isMelee: true, duration: 0.25, icon: icnMelee },
+        { id: 12, name: "Rapier", damage: 8, energy: 0, fireRate: 200, speed: 50, spread: 0.1, count: 1, auto: true, color: 0xffffff, rarity: RARITY.UNCOMMON, isMelee: true, duration: 0.1, icon: icnMelee },
+        { id: 13, name: "Pitchfork", damage: 9, energy: 0, fireRate: 600, speed: 35, spread: 0.2, count: 3, auto: false, color: 0x9ca3af, rarity: RARITY.COMMON, isMelee: true, duration: 0.2, scale: 1.5, icon: icnMelee },
+        { id: 14, name: "Scythe", damage: 16, energy: 0, fireRate: 800, speed: 25, spread: 1.0, count: 1, auto: false, color: 0x4a5568, rarity: RARITY.RARE, isMelee: true, duration: 0.3, icon: icnMelee },
+        { id: 15, name: "Executioner", damage: 35, energy: 0, fireRate: 1500, speed: 15, spread: 2.0, count: 1, auto: false, color: 0xf87171, rarity: RARITY.EPIC, isMelee: true, duration: 0.5, scale: 2.5, icon: icnMelee },
+        { id: 16, name: "Wooden Cross", damage: 10, energy: 0, fireRate: 1000, speed: 20, spread: 1.0, count: 1, auto: false, color: 0xd97706, rarity: RARITY.UNCOMMON, isMelee: true, duration: 0.4, icon: icnMelee },
+        { id: 17, name: "Boxer Gloves", damage: 5, energy: 0, fireRate: 150, speed: 30, spread: 0.2, count: 1, auto: true, color: 0xef4444, rarity: RARITY.COMMON, isMelee: true, duration: 0.1, icon: icnMelee },
+        { id: 18, name: "Vacuum Cleaner", damage: 2, energy: 0, fireRate: 100, speed: 20, spread: 0.5, count: 1, auto: true, color: 0xa0aec0, rarity: RARITY.RARE, isMelee: true, duration: 0.1, element: 'freeze', icon: icnMisc },
+        { id: 19, name: "Plunger", damage: 5, energy: 0, fireRate: 400, speed: 30, spread: 0.1, count: 1, auto: false, color: 0xd97706, rarity: RARITY.COMMON, isMelee: true, duration: 0.1, explode: true, icon: icnMisc },
+        { id: 20, name: "Shovel", damage: 8, energy: 0, fireRate: 700, speed: 20, spread: 0.5, count: 1, auto: false, color: 0x9ca3af, rarity: RARITY.COMMON, isMelee: true, duration: 0.3, icon: icnMelee },
+
+        // II. Elemental & Status Effects
+        { id: 21, name: "Frost Eagle", damage: 4, energy: 1, fireRate: 350, speed: 35, spread: 0.05, count: 1, auto: false, color: 0x60a5fa, rarity: RARITY.RARE, element: 'freeze', icon: icnGun },
+        { id: 22, name: "Flame Eagle", damage: 4, energy: 1, fireRate: 350, speed: 35, spread: 0.05, count: 1, auto: false, color: 0xf87171, rarity: RARITY.RARE, element: 'fire', icon: icnGun },
+        { id: 23, name: "Plasma Eagle", damage: 4, energy: 1, fireRate: 350, speed: 35, spread: 0.05, count: 1, auto: false, color: 0xfacc15, rarity: RARITY.RARE, pierce: true, icon: icnGun },
+        { id: 24, name: "Poison Eagle", damage: 4, energy: 1, fireRate: 350, speed: 35, spread: 0.05, count: 1, auto: false, color: 0x4ade80, rarity: RARITY.RARE, element: 'poison', icon: icnGun },
+        { id: 25, name: "Lightning Eagle", damage: 4, energy: 1, fireRate: 350, speed: 50, spread: 0.05, count: 1, auto: false, color: 0xa855f7, rarity: RARITY.RARE, pierce: true, icon: icnGun },
+        { id: 26, name: "Ice Breaker", damage: 6, energy: 3, fireRate: 600, speed: 30, spread: 0.2, count: 3, auto: false, color: 0x60a5fa, rarity: RARITY.EPIC, element: 'freeze', icon: icnGun },
+        { id: 27, name: "Fire Blaster", damage: 2, energy: 1, fireRate: 80, speed: 15, spread: 0.4, count: 2, auto: true, color: 0xf87171, rarity: RARITY.EPIC, element: 'fire', icon: icnGun },
+        { id: 28, name: "Toxic Web", damage: 2, energy: 2, fireRate: 500, speed: 15, spread: 0.1, count: 1, auto: false, color: 0x4ade80, rarity: RARITY.UNCOMMON, element: 'poison', scale: 2.0, icon: icnGun },
+        { id: 29, name: "Thunderbolt Staff", damage: 10, energy: 4, fireRate: 800, speed: 60, spread: 0, count: 1, auto: false, color: 0xfacc15, rarity: RARITY.RARE, pierce: true, icon: icnStaff },
+        { id: 30, name: "Blizzard Staff", damage: 5, energy: 3, fireRate: 500, speed: 25, spread: 0.5, count: 5, auto: true, color: 0x60a5fa, rarity: RARITY.EPIC, element: 'freeze', icon: icnStaff },
+        { id: 31, name: "Volcano", damage: 8, energy: 4, fireRate: 700, speed: 20, spread: 0.3, count: 3, auto: false, color: 0xf87171, rarity: RARITY.EPIC, element: 'fire', icon: icnGun },
+        { id: 32, name: "Acid Rain", damage: 4, energy: 2, fireRate: 400, speed: 10, spread: 1.0, count: 4, auto: true, color: 0x4ade80, rarity: RARITY.RARE, element: 'poison', icon: icnStaff },
+        { id: 33, name: "Super Glue Gun", damage: 1, energy: 1, fireRate: 100, speed: 25, spread: 0.2, count: 1, auto: true, color: 0xfcd34d, rarity: RARITY.UNCOMMON, element: 'freeze', icon: icnGun },
+        { id: 34, name: "EMP Grenade Launcher", damage: 10, energy: 3, fireRate: 900, speed: 25, spread: 0.1, count: 1, auto: false, color: 0x60a5fa, rarity: RARITY.RARE, element: 'freeze', explode: true, icon: icnExplode },
+        { id: 35, name: "Solar Flare", damage: 12, energy: 5, fireRate: 800, speed: 45, spread: 0, count: 1, auto: false, color: 0xf87171, rarity: RARITY.LEGENDARY, element: 'fire', pierce: true, scale: 2.0, icon: icnGun },
+
+        // III. Legendary & Weird
+        { id: 36, name: "Laser Fish", damage: 2, energy: 0, fireRate: 100, speed: 40, spread: 0.05, count: 1, auto: true, color: 0x60a5fa, rarity: RARITY.LEGENDARY, element: 'freeze', icon: icnMisc },
+        { id: 37, name: "Heavenly Sword", damage: 15, energy: 0, fireRate: 500, speed: 30, spread: 0, count: 1, auto: true, color: 0xfacc15, rarity: RARITY.LEGENDARY, homing: true, pierce: true, icon: icnMelee },
+        { id: 38, name: "Death Note", damage: 99, energy: 10, fireRate: 2000, speed: 100, spread: 0, count: 1, auto: false, color: 0x000000, rarity: RARITY.LEGENDARY, homing: true, icon: icnMisc },
+        { id: 39, name: "One Punch", damage: 999, energy: 99, fireRate: 5000, speed: 30, spread: 0, count: 1, auto: false, color: 0xf87171, rarity: RARITY.LEGENDARY, nuke: true, icon: icnMelee },
+        { id: 40, name: "Staff of Skeleton", damage: 5, energy: 5, fireRate: 1000, speed: 20, spread: 0.5, count: 3, auto: false, color: 0xe5e7eb, rarity: RARITY.EPIC, homing: true, icon: icnStaff },
+        { id: 41, name: "Staff of Illusion", damage: 8, energy: 10, fireRate: 2000, speed: 25, spread: 0.2, count: 5, auto: false, color: 0xa855f7, rarity: RARITY.LEGENDARY, homing: true, icon: icnStaff },
+        { id: 42, name: "Groundwater", damage: 3, energy: 0, fireRate: 0, speed: 40, spread: 0.05, count: 1, auto: false, color: 0xffffff, rarity: RARITY.EPIC, groundwater: true, icon: icnGun },
+        { id: 43, name: "Gatling Gun", damage: 3, energy: 1, fireRate: 50, speed: 45, spread: 0.25, count: 1, auto: true, color: 0xfacc15, rarity: RARITY.EPIC, slowsPlayer: true, icon: icnGun },
+        { id: 44, name: "Soul Calibre", damage: 60, energy: 15, fireRate: 2000, speed: 100, spread: 0, count: 1, auto: false, color: 0xf87171, scale: 1.5, rarity: RARITY.LEGENDARY, pierce: true, icon: icnGun },
+        { id: 45, name: "Aurora", damage: 35, energy: 6, fireRate: 1200, speed: 80, spread: 0, count: 1, auto: false, color: 0xffffff, scale: 1.2, rarity: RARITY.EPIC, pierce: true, icon: icnGun },
+        { id: 46, name: "Magic Bow", damage: 10, energy: 4, fireRate: 600, speed: 30, spread: 0.3, count: 4, auto: false, color: 0x60a5fa, rarity: RARITY.RARE, homing: true, icon: icnBow },
+        { id: 47, name: "Starbow", damage: 15, energy: 6, fireRate: 700, speed: 40, spread: 0.1, count: 1, auto: false, color: 0xfacc15, rarity: RARITY.LEGENDARY, homing: true, explode: true, icon: icnBow },
+        { id: 48, name: "Money Gun", damage: 10, energy: 1, fireRate: 200, speed: 35, spread: 0.1, count: 1, auto: true, color: 0xfacc15, rarity: RARITY.EPIC, icon: icnGun },
+        { id: 49, name: "Agitated Trunk", damage: 8, energy: 0, fireRate: 150, speed: 0, spread: 1.0, count: 1, auto: true, color: 0x8b4513, rarity: RARITY.RARE, isMelee: true, duration: 0.2, slowsPlayer: true, icon: icnMelee },
+        { id: 50, name: "Breath of Hades", damage: 20, energy: 0, fireRate: 500, speed: 30, spread: 0.5, count: 3, auto: false, color: 0x7f1d1d, rarity: RARITY.LEGENDARY, pierce: true, scale: 2.0, icon: icnMelee },
+
+        // IV. Projectile Variety
+        { id: 51, name: "Bouncing Railgun", damage: 12, energy: 4, fireRate: 800, speed: 45, spread: 0, count: 1, auto: false, color: 0x93c5fd, rarity: RARITY.EPIC, pierce: true, icon: icnGun },
+        { id: 52, name: "Splitter Cannon", damage: 10, energy: 5, fireRate: 900, speed: 25, spread: 0.5, count: 8, auto: false, color: 0xfacc15, scale: 1.2, rarity: RARITY.EPIC, explode: true, icon: icnGun },
+        { id: 53, name: "Black Hole Missile", damage: 5, energy: 6, fireRate: 1500, speed: 15, spread: 0, count: 1, auto: false, color: 0x4a5568, scale: 2.0, rarity: RARITY.LEGENDARY, explode: true, element: 'freeze', icon: icnExplode },
+        { id: 54, name: "Boomerang", damage: 8, energy: 0, fireRate: 600, speed: 30, spread: 0, count: 1, auto: false, color: 0x8b4513, rarity: RARITY.UNCOMMON, pierce: true, homing: true, icon: icnMisc },
+        { id: 55, name: "Disc Launcher", damage: 6, energy: 2, fireRate: 400, speed: 35, spread: 0.1, count: 1, auto: true, color: 0x9ca3af, rarity: RARITY.RARE, pierce: true, icon: icnGun },
+        { id: 56, name: "Cactus", damage: 3, energy: 2, fireRate: 600, speed: 25, spread: 3.14, count: 12, auto: false, color: 0x22c55e, rarity: RARITY.UNCOMMON, icon: icnMisc },
+        { id: 57, name: "Windforce", damage: 12, energy: 3, fireRate: 500, speed: 50, spread: 0.05, count: 1, auto: false, color: 0xe5e7eb, rarity: RARITY.EPIC, pierce: true, icon: icnBow },
+        { id: 58, name: "Crossbow Plus", damage: 6, energy: 2, fireRate: 400, speed: 40, spread: 0.2, count: 5, auto: false, color: 0x718096, rarity: RARITY.RARE, icon: icnBow },
+        { id: 59, name: "TNT Bundle", damage: 40, energy: 5, fireRate: 1500, speed: 20, spread: 0, count: 1, auto: false, color: 0xf87171, scale: 1.5, rarity: RARITY.RARE, explode: true, icon: icnExplode },
+        { id: 60, name: "Molotov", damage: 15, energy: 3, fireRate: 1000, speed: 25, spread: 0, count: 1, auto: false, color: 0xf97316, rarity: RARITY.UNCOMMON, explode: true, element: 'fire', icon: icnMisc },
+
+        // V. Throwing & Miscellaneous
+        { id: 61, name: "Kitchen Knife", damage: 6, energy: 0, fireRate: 300, speed: 40, spread: 0.05, count: 1, auto: true, color: 0xd1d5db, rarity: RARITY.COMMON, pierce: true, icon: icnMisc },
+        { id: 62, name: "Paper Plane", damage: 12, energy: 0, fireRate: 600, speed: 15, spread: 0.2, count: 1, auto: false, color: 0xffffff, rarity: RARITY.UNCOMMON, homing: true, icon: icnMisc },
+        { id: 63, name: "Fidget Spinner", damage: 3, energy: 0, fireRate: 200, speed: 30, spread: 3.14, count: 3, auto: true, color: 0xfacc15, rarity: RARITY.UNCOMMON, isMelee: true, duration: 0.5, icon: icnMisc },
+        { id: 64, name: "Electric Ninja Star", damage: 5, energy: 1, fireRate: 300, speed: 45, spread: 0.1, count: 2, auto: true, color: 0x60a5fa, rarity: RARITY.RARE, pierce: true, icon: icnMisc },
+        { id: 65, name: "Vines", damage: 4, energy: 2, fireRate: 500, speed: 25, spread: 0.1, count: 3, auto: false, color: 0x22c55e, rarity: RARITY.RARE, element: 'poison', icon: icnMisc },
+        { id: 66, name: "Microphone", damage: 5, energy: 1, fireRate: 400, speed: 20, spread: 3.14, count: 8, auto: true, color: 0x9ca3af, rarity: RARITY.UNCOMMON, pierce: true, icon: icnMisc },
+        { id: 67, name: "Trumpet", damage: 2, energy: 1, fireRate: 300, speed: 20, spread: 0.5, count: 3, auto: true, color: 0xfacc15, rarity: RARITY.COMMON, pierce: true, icon: icnMisc },
+        { id: 68, name: "Green Onion", damage: 4, energy: 0, fireRate: 250, speed: 30, spread: 0.3, count: 1, auto: true, color: 0x4ade80, rarity: RARITY.COMMON, isMelee: true, duration: 0.15, icon: icnMelee },
+        { id: 69, name: "Carrot", damage: 5, energy: 1, fireRate: 350, speed: 35, spread: 0.1, count: 1, auto: false, color: 0xf97316, rarity: RARITY.UNCOMMON, icon: icnMisc },
+        { id: 70, name: "Fish", damage: 4, energy: 0, fireRate: 300, speed: 25, spread: 0.2, count: 1, auto: true, color: 0x60a5fa, rarity: RARITY.UNCOMMON, isMelee: true, duration: 0.2, icon: icnMelee },
+
+        // VI. High-Tech & Sci-Fi
+        { id: 71, name: "Orbital Laser", damage: 50, energy: 15, fireRate: 3000, speed: 10, spread: 0, count: 1, auto: false, color: 0xf87171, scale: 3.0, rarity: RARITY.LEGENDARY, nuke: true, icon: icnGun },
+        { id: 72, name: "Drone Controller", damage: 4, energy: 2, fireRate: 400, speed: 25, spread: 1.0, count: 3, auto: true, color: 0x9ca3af, rarity: RARITY.EPIC, homing: true, icon: icnMisc },
+        { id: 73, name: "Gravity Gun", damage: 8, energy: 3, fireRate: 600, speed: 30, spread: 0, count: 1, auto: false, color: 0xfacc15, rarity: RARITY.EPIC, element: 'freeze', icon: icnGun },
+        { id: 74, name: "Portal Gun", damage: 1, energy: 1, fireRate: 500, speed: 40, spread: 0, count: 1, auto: false, color: 0x3b82f6, rarity: RARITY.RARE, pierce: true, icon: icnGun },
+        { id: 75, name: "Tesla Coil", damage: 3, energy: 1, fireRate: 100, speed: 50, spread: 0.1, count: 2, auto: true, color: 0x60a5fa, rarity: RARITY.EPIC, pierce: true, icon: icnGun },
+        { id: 76, name: "Shield Generator", damage: 0, energy: 5, fireRate: 2000, speed: 0, spread: 3.14, count: 1, auto: false, color: 0x3b82f6, rarity: RARITY.RARE, isMelee: true, duration: 2.0, scale: 3.0, icon: icnMisc },
+        { id: 77, name: "Railgun", damage: 25, energy: 6, fireRate: 1000, speed: 80, spread: 0, count: 1, auto: false, color: 0x93c5fd, rarity: RARITY.EPIC, pierce: true, icon: icnGun },
+        { id: 78, name: "Mini Uzi", damage: 1, energy: 0, fireRate: 50, speed: 40, spread: 0.3, count: 1, auto: true, color: 0x4b5563, rarity: RARITY.COMMON, icon: icnGun },
+        { id: 79, name: "Rocket Launcher", damage: 30, energy: 8, fireRate: 1200, speed: 20, spread: 0, count: 1, auto: false, color: 0xfacc15, scale: 2.5, rarity: RARITY.EPIC, explode: true, icon: icnExplode },
+        { id: 80, name: "Multi-Rocket Launcher", damage: 15, energy: 10, fireRate: 1500, speed: 25, spread: 0.4, count: 4, auto: false, color: 0xfacc15, scale: 1.5, rarity: RARITY.LEGENDARY, explode: true, homing: true, icon: icnExplode },
+
+        // VII. Mythical & Magic
+        { id: 81, name: "Wizard's Staff", damage: 8, energy: 3, fireRate: 500, speed: 30, spread: 0.1, count: 2, auto: false, color: 0xa855f7, rarity: RARITY.RARE, homing: true, icon: icnStaff },
+        { id: 82, name: "Crystal Crab's Katana", damage: 12, energy: 0, fireRate: 600, speed: 30, spread: 0.5, count: 3, auto: false, color: 0x60a5fa, rarity: RARITY.LEGENDARY, isMelee: true, duration: 0.3, scale: 1.5, icon: icnMelee },
+        { id: 83, name: "Deep Sea Trident", damage: 10, energy: 4, fireRate: 700, speed: 35, spread: 0.2, count: 3, auto: false, color: 0x3b82f6, rarity: RARITY.EPIC, pierce: true, icon: icnStaff },
+        { id: 84, name: "Phoenix Pinion", damage: 6, energy: 2, fireRate: 400, speed: 40, spread: 0.1, count: 3, auto: true, color: 0xf87171, rarity: RARITY.EPIC, element: 'fire', homing: true, icon: icnMisc },
+        { id: 85, name: "Darkness Staff", damage: 15, energy: 5, fireRate: 800, speed: 25, spread: 0, count: 1, auto: false, color: 0x4c1d95, rarity: RARITY.EPIC, element: 'poison', homing: true, icon: icnStaff },
+        { id: 86, name: "Anubis Staff", damage: 10, energy: 4, fireRate: 600, speed: 30, spread: 0.2, count: 3, auto: false, color: 0xfacc15, rarity: RARITY.LEGENDARY, pierce: true, icon: icnStaff },
+        { id: 87, name: "Goddess Staff", damage: 5, energy: 6, fireRate: 1000, speed: 20, spread: 3.14, count: 8, auto: false, color: 0xfcd34d, rarity: RARITY.LEGENDARY, element: 'freeze', icon: icnStaff },
+        { id: 88, name: "Dragon Bros Sniper", damage: 30, energy: 8, fireRate: 1500, speed: 80, spread: 0, count: 1, auto: false, color: 0xf87171, rarity: RARITY.LEGENDARY, pierce: true, element: 'fire', icon: icnGun },
+        { id: 89, name: "Giant Axe", damage: 40, energy: 0, fireRate: 1500, speed: 15, spread: 1.5, count: 1, auto: false, color: 0x9ca3af, rarity: RARITY.EPIC, isMelee: true, duration: 0.6, scale: 3.0, icon: icnMelee },
+        { id: 90, name: "Magic Glove", damage: 8, energy: 4, fireRate: 300, speed: 35, spread: 0.2, count: 2, auto: true, color: 0xc084fc, rarity: RARITY.LEGENDARY, element: 'fire', homing: true, icon: icnMisc },
+
+        // VIII. Completionist
+        { id: 91, name: "Handgun (Old)", damage: 3, energy: 0, fireRate: 400, speed: 30, spread: 0.05, count: 1, auto: false, color: 0x9ca3af, rarity: RARITY.COMMON, icon: icnGun },
+        { id: 92, name: "Revolver", damage: 8, energy: 1, fireRate: 500, speed: 45, spread: 0.02, count: 1, auto: false, color: 0xd1d5db, rarity: RARITY.UNCOMMON, icon: icnGun },
+        { id: 93, name: "Sawed-off Shotgun", damage: 5, energy: 3, fireRate: 800, speed: 20, spread: 0.6, count: 8, auto: false, color: 0x718096, rarity: RARITY.UNCOMMON, icon: icnGun },
+        { id: 94, name: "Assault Rifle Pro", damage: 4, energy: 1, fireRate: 120, speed: 40, spread: 0.1, count: 1, auto: true, color: 0x60a5fa, rarity: RARITY.RARE, icon: icnGun },
+        { id: 95, name: "Blowpipe", damage: 2, energy: 0, fireRate: 300, speed: 35, spread: 0.05, count: 1, auto: true, color: 0x4ade80, rarity: RARITY.COMMON, element: 'poison', icon: icnGun },
+        { id: 96, name: "Homing Missile", damage: 15, energy: 4, fireRate: 1000, speed: 20, spread: 0, count: 1, auto: false, color: 0xfacc15, rarity: RARITY.RARE, homing: true, explode: true, icon: icnExplode },
+        { id: 97, name: "Grenade SMG", damage: 3, energy: 2, fireRate: 150, speed: 35, spread: 0.2, count: 1, auto: true, color: 0xf87171, rarity: RARITY.EPIC, explode: true, icon: icnGun },
+        { id: 98, name: "Double Therapy", damage: 6, energy: 3, fireRate: 200, speed: 60, spread: 0.1, count: 2, auto: true, color: 0xa855f7, rarity: RARITY.EPIC, pierce: true, icon: icnGun },
+        { id: 99, name: "The Super Buddy", damage: 999, energy: 50, fireRate: 5000, speed: 10, spread: 0, count: 1, auto: false, color: 0xf87171, scale: 5, rarity: RARITY.LEGENDARY, nuke: true, icon: icnExplode }
+    ];
+
+    let currentWeaponIndex = 0;
+    let lastFireTime = 0;
+    let isShooting = false;
+    let clickTriggered = false; // For Groundwater
+
+    // Collections
+    let player, playerGun, gunTip;
+    let rooms = {};
+    let roomList = [];
+    let walls = [];
+    let doors = [];
+    let enemies = [];
+    let bullets = [];
+    let items = [];
+    let interactables = [];
+    let barrels = [];
+    let spikes = [];
+    let explosions = [];
+
+    // Three.js Core
+    let scene, camera, renderer, clock;
+    let mouse = new THREE.Vector2();
+    let raycaster = new THREE.Raycaster();
+    let lookTarget = new THREE.Vector3();
+    const keys = { w: false, a: false, s: false, d: false, e: false };
+
+    // UI Elements
+    const UI = {
+        healthFill: document.getElementById('health-fill'), healthText: document.getElementById('health-text'),
+        armorFill: document.getElementById('armor-fill'), armorText: document.getElementById('armor-text'),
+        energyFill: document.getElementById('energy-fill'), energyText: document.getElementById('energy-text'),
+        coinText: document.getElementById('coin-text'), levelDisplay: document.getElementById('level-display'),
+        weaponName: document.getElementById('weapon-name'), weaponCost: document.getElementById('weapon-cost'), weaponIcon: document.getElementById('weapon-icon'),
+        roomAlert: document.getElementById('room-alert'),
+        prompt: document.getElementById('interaction-prompt'), promptMain: document.getElementById('prompt-main'), promptSub: document.getElementById('prompt-sub'),
+        minimap: document.getElementById('minimap'), ctx: document.getElementById('minimap').getContext('2d'),
+        mainMenu: document.getElementById('main-menu'), gameOver: document.getElementById('game-over-menu'),
+        pauseMenu: document.getElementById('pause-menu')
+    };
+
+    // Materials
+    const MATS = {
+        player: new THREE.MeshStandardMaterial({ color: 0x4299e1, roughness: 0.2, metalness: 0.5 }),
+        enemy: new THREE.MeshStandardMaterial({ color: 0xe53e3e, roughness: 0.6 }),
+        wall: new THREE.MeshStandardMaterial({ color: 0x2d3748, roughness: 0.9 }),
+        doorLocked: new THREE.MeshStandardMaterial({ color: 0xc53030, transparent: true, opacity: 0.8 }),
+        doorOpen: new THREE.MeshStandardMaterial({ color: 0x48bb78, transparent: true, opacity: 0.2 }),
+        floor: new THREE.MeshStandardMaterial({ color: 0x1a202c, roughness: 1.0 }),
+        floorStart: new THREE.MeshStandardMaterial({ color: 0x276749, roughness: 1.0 }),
+        floorEnd: new THREE.MeshStandardMaterial({ color: 0x553c9a, roughness: 1.0 }),
+        bullet: new THREE.MeshBasicMaterial({ color: 0xffff00 }),
+        coin: new THREE.MeshStandardMaterial({ color: 0xeab308, metalness: 1, roughness: 0.2 }),
+        energy: new THREE.MeshStandardMaterial({ color: 0x4299e1, transparent: true, opacity: 0.8, emissive: 0x2b6cb0 }),
+        chest: new THREE.MeshStandardMaterial({ color: 0x8b4513 }),
+        vendingW: new THREE.MeshStandardMaterial({ color: 0xeab308, roughness: 0.5 }),
+        vendingP: new THREE.MeshStandardMaterial({ color: 0x60a5fa, roughness: 0.5 }),
+        portal: new THREE.MeshBasicMaterial({ color: 0x9f7aea, transparent: true, opacity: 0.8 }),
+        enemyFast: new THREE.MeshStandardMaterial({ color: 0xf6ad55, roughness: 0.4 }),
+        enemyTank: new THREE.MeshStandardMaterial({ color: 0x9b2c2c, roughness: 0.8 }),
+        enemyBoss: new THREE.MeshStandardMaterial({ color: 0x805ad5, roughness: 0.5, metalness: 0.5 }),
+        enemyBoar: new THREE.MeshStandardMaterial({ color: 0x8b4513, roughness: 0.9 }),
+        enemyGrunt: new THREE.MeshStandardMaterial({ color: 0x4ade80, roughness: 0.6 }),
+        enemySlime: new THREE.MeshStandardMaterial({ color: 0x22c55e, transparent: true, opacity: 0.5 }),
+        enemyTurret: new THREE.MeshStandardMaterial({ color: 0x4b5563, metalness: 0.6 }),
+        gunMat: new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.3, metalness: 0.6 }),
+        barrelRed: new THREE.MeshStandardMaterial({ color: 0xef4444, roughness: 0.7 }),
+        barrelBlue: new THREE.MeshStandardMaterial({ color: 0x3b82f6, roughness: 0.7 }),
+        barrelGreen: new THREE.MeshStandardMaterial({ color: 0x10b981, roughness: 0.7 }),
+        spike: new THREE.MeshStandardMaterial({ color: 0x718096, metalness: 0.8, roughness: 0.2 }),
+        explosion: new THREE.MeshBasicMaterial({ color: 0xffa500, transparent: true, opacity: 0.6 }),
+        meleeSwoosh: new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.4 })
+    };
+
+    // Geometries
+    const GEOS = {
+        box: new THREE.BoxGeometry(1, 1, 1),
+        sphere: new THREE.SphereGeometry(1, 8, 8),
+        cylinder: new THREE.CylinderGeometry(1, 1, 1, 16),
+        octahedron: new THREE.OctahedronGeometry(1, 0),
+        barrel: new THREE.CylinderGeometry(0.6, 0.6, 1.5, 12),
+        spike: new THREE.ConeGeometry(0.4, 1, 4)
+    };
+
+    // --- INIT & SETUP ---
+    function init() {
+        scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x000000);
+
+        camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+        camera.position.set(0, 30, 15);
+        camera.lookAt(0, 0, 0);
+
+        renderer = new THREE.WebGLRenderer({ canvas: document.getElementById('game-canvas'), antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        renderer.shadowMap.enabled = true;
+
+        clock = new THREE.Clock();
+
+        // Lighting
+        scene.add(new THREE.AmbientLight(0x404040, 2.0));
+        const dirLight = new THREE.DirectionalLight(0xffffff, 1.2);
+        dirLight.position.set(20, 50, 20);
+        dirLight.castShadow = true;
+        dirLight.shadow.camera.left = -40; dirLight.shadow.camera.right = 40;
+        dirLight.shadow.camera.top = 40; dirLight.shadow.camera.bottom = -40;
+        scene.add(dirLight);
+
+        // Player Group Setup
+        player = new THREE.Group();
+        const body = new THREE.Mesh(GEOS.box, MATS.player);
+        body.scale.set(1.4, 1.4, 1.4);
+        body.position.y = 0.7;
+        body.castShadow = true;
+
+        playerGun = new THREE.Mesh(GEOS.box, MATS.gunMat.clone());
+        gunTip = new THREE.Object3D();
+
+        player.add(body, playerGun, gunTip);
+        scene.add(player);
+
+        // Events
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        document.addEventListener('keydown', e => {
+            if (e.key === 'Escape') togglePause();
+            if (e.key.toLowerCase() in keys) keys[e.key.toLowerCase()] = true;
+        });
+
+        document.addEventListener('keyup', e => {
+            if (e.key.toLowerCase() in keys) keys[e.key.toLowerCase()] = false;
+        });
+
+        document.addEventListener('mousemove', e => {
+            mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
+            mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
+        });
+
+        document.addEventListener('mousedown', e => {
+            if(e.button === 0 && STATE.isRunning && !STATE.isPaused) {
+                isShooting = true;
+                clickTriggered = true; // Support for groundwater
+            }
+        });
+        document.addEventListener('mouseup', e => { if(e.button === 0) isShooting = false; });
+
+        document.getElementById('start-btn').addEventListener('click', startGame);
+        document.getElementById('restart-btn').addEventListener('click', startGame);
+        document.getElementById('pause-btn').addEventListener('click', togglePause);
+        document.getElementById('resume-btn').addEventListener('click', togglePause);
+
+        requestAnimationFrame(animate);
+    }
+
+    function togglePause() {
+        if (!STATE.isRunning || !UI.gameOver.classList.contains('hidden')) return;
+        STATE.isPaused = !STATE.isPaused;
+
+        if (STATE.isPaused) {
+            UI.pauseMenu.classList.remove('hidden');
+        } else {
+            UI.pauseMenu.classList.add('hidden');
+        }
+    }
+
+    // --- DUNGEON GENERATION ---
+
+    function generateDungeon() {
+        clearScene();
+
+        rooms = {};
+        roomList = [];
+        walls = [];
+        doors = [];
+        STATE.activeRoomKey = null;
+
+        const numRooms = 5 + STATE.floor * 2;
+
+        // Start Room
+        rooms['0,0'] = { x: 0, z: 0, type: 'start', doors: {}, cleared: true, discovered: true, enemies: [], w: 24, d: 24 };
+        roomList.push(rooms['0,0']);
+
+        let shopCount = 0;
+        let treasureCount = 0;
+        const maxShops = 1;
+        const maxTreasures = 1;
+
+        // Random Walk Generation
+        for (let i = 1; i < numRooms; i++) {
+            let added = false;
+            let attempts = 0;
+            while (!added && attempts < 50) {
+                let r = roomList[Math.floor(Math.random() * roomList.length)];
+                let dirs = [ {dx:0, dz:-1, from:'north', to:'south'}, {dx:0, dz:1, from:'south', to:'north'},
+                    {dx:1, dz:0, from:'east', to:'west'}, {dx:-1, dz:0, from:'west', to:'east'} ];
+                let dir = dirs[Math.floor(Math.random() * dirs.length)];
+
+                let nx = r.x + dir.dx;
+                let nz = r.z + dir.dz;
+                let key = `${nx},${nz}`;
+
+                if (!rooms[key]) {
+                    let type = 'normal';
+                    if (i === numRooms - 1) {
+                        type = 'end';
+                    } else if (shopCount < maxShops && Math.random() < 0.2) {
+                        type = 'shop';
+                        shopCount++;
+                    } else if (treasureCount < maxTreasures && Math.random() < 0.15) {
+                        type = 'treasure';
+                        treasureCount++;
+                    }
+
+                    let rw = type === 'end' ? 32 : Math.floor(Math.random() * 12 + 20);
+                    let rd = type === 'end' ? 32 : Math.floor(Math.random() * 12 + 20);
+
+                    rooms[key] = { x: nx, z: nz, type: type, doors: {}, cleared: false, discovered: false, enemies: [], w: rw, d: rd };
+                    r.doors[dir.from] = true;
+                    rooms[key].doors[dir.to] = true;
+                    roomList.push(rooms[key]);
+                    added = true;
+                }
+                attempts++;
+            }
+        }
+
+        roomList.forEach(room => buildRoomMeshes(room));
+
+        player.position.set(0, 0, 0);
+        updatePlayerGun();
+        updateHUD();
+    }
+
+    function buildRoomMeshes(room) {
+        const cx = room.x * STRIDE;
+        const cz = room.z * STRIDE;
+        const hw = room.w / 2;
+        const hd = room.d / 2;
+
+        let fMat = MATS.floor;
+        if (room.type === 'start') fMat = MATS.floorStart;
+        if (room.type === 'end') fMat = MATS.floorEnd;
+
+        const floor = new THREE.Mesh(new THREE.PlaneGeometry(room.w, room.d), fMat);
+        floor.rotation.x = -Math.PI / 2;
+        floor.position.set(cx, 0, cz);
+        floor.receiveShadow = true;
+        scene.add(floor);
+
+        const addWall = (x, z, w, d) => {
+            const mesh = new THREE.Mesh(GEOS.box, MATS.wall);
+            mesh.scale.set(w, 4, d);
+            mesh.position.set(x, 2, z);
+            mesh.castShadow = true; mesh.receiveShadow = true;
+            scene.add(mesh);
+            walls.push({ box: { x, z, w, d } });
+        };
+
+        const addDoor = (x, z, w, d, dirName) => {
+            const mesh = new THREE.Mesh(GEOS.box, MATS.doorOpen);
+            mesh.scale.set(w, 4, d);
+            mesh.position.set(x, 2, z);
+            scene.add(mesh);
+            room.doorObjects = room.doorObjects || [];
+            room.doorObjects.push({ mesh, box: { x, z, w, d } });
+        };
+
+        // North Wall
+        if (room.doors.north) {
+            const sideSeg = (room.w - CORRIDOR_WIDTH) / 2;
+            addWall(cx - CORRIDOR_WIDTH/2 - sideSeg/2, cz - hd - WALL_THICK/2, sideSeg, WALL_THICK);
+            addWall(cx + CORRIDOR_WIDTH/2 + sideSeg/2, cz - hd - WALL_THICK/2, sideSeg, WALL_THICK);
+            addDoor(cx, cz - hd - WALL_THICK/2, CORRIDOR_WIDTH, WALL_THICK, 'north');
+
+            const corrLen = (STRIDE / 2) - hd;
+            if (corrLen > 0) {
+                const cf = new THREE.Mesh(new THREE.PlaneGeometry(CORRIDOR_WIDTH, corrLen), MATS.floor);
+                cf.rotation.x = -Math.PI / 2;
+                cf.position.set(cx, 0, cz - hd - corrLen/2);
+                scene.add(cf);
+                addWall(cx - CORRIDOR_WIDTH/2 - WALL_THICK/2, cz - hd - corrLen/2, WALL_THICK, corrLen);
+                addWall(cx + CORRIDOR_WIDTH/2 + WALL_THICK/2, cz - hd - corrLen/2, WALL_THICK, corrLen);
+            }
+        } else {
+            addWall(cx, cz - hd - WALL_THICK/2, room.w + WALL_THICK*2, WALL_THICK);
+        }
+
+        // South Wall
+        if (room.doors.south) {
+            const sideSeg = (room.w - CORRIDOR_WIDTH) / 2;
+            addWall(cx - CORRIDOR_WIDTH/2 - sideSeg/2, cz + hd + WALL_THICK/2, sideSeg, WALL_THICK);
+            addWall(cx + CORRIDOR_WIDTH/2 + sideSeg/2, cz + hd + WALL_THICK/2, sideSeg, WALL_THICK);
+            addDoor(cx, cz + hd + WALL_THICK/2, CORRIDOR_WIDTH, WALL_THICK, 'south');
+
+            const corrLen = (STRIDE / 2) - hd;
+            if (corrLen > 0) {
+                const cf = new THREE.Mesh(new THREE.PlaneGeometry(CORRIDOR_WIDTH, corrLen), MATS.floor);
+                cf.rotation.x = -Math.PI / 2;
+                cf.position.set(cx, 0, cz + hd + corrLen/2);
+                scene.add(cf);
+                addWall(cx - CORRIDOR_WIDTH/2 - WALL_THICK/2, cz + hd + corrLen/2, WALL_THICK, corrLen);
+                addWall(cx + CORRIDOR_WIDTH/2 + WALL_THICK/2, cz + hd + corrLen/2, WALL_THICK, corrLen);
+            }
+        } else {
+            addWall(cx, cz + hd + WALL_THICK/2, room.w + WALL_THICK*2, WALL_THICK);
+        }
+
+        // West Wall
+        if (room.doors.west) {
+            const sideSeg = (room.d - CORRIDOR_WIDTH) / 2;
+            addWall(cx - hw - WALL_THICK/2, cz - CORRIDOR_WIDTH/2 - sideSeg/2, WALL_THICK, sideSeg);
+            addWall(cx - hw - WALL_THICK/2, cz + CORRIDOR_WIDTH/2 + sideSeg/2, WALL_THICK, sideSeg);
+            addDoor(cx - hw - WALL_THICK/2, cz, WALL_THICK, CORRIDOR_WIDTH, 'west');
+
+            const corrLen = (STRIDE / 2) - hw;
+            if (corrLen > 0) {
+                const cf = new THREE.Mesh(new THREE.PlaneGeometry(corrLen, CORRIDOR_WIDTH), MATS.floor);
+                cf.rotation.x = -Math.PI / 2;
+                cf.position.set(cx - hw - corrLen/2, 0, cz);
+                scene.add(cf);
+                addWall(cx - hw - corrLen/2, cz - CORRIDOR_WIDTH/2 - WALL_THICK/2, corrLen, WALL_THICK);
+                addWall(cx - hw - corrLen/2, cz + CORRIDOR_WIDTH/2 + WALL_THICK/2, corrLen, WALL_THICK);
+            }
+        } else {
+            addWall(cx - hw - WALL_THICK/2, cz, WALL_THICK, room.d + WALL_THICK*2);
+        }
+
+        // East Wall
+        if (room.doors.east) {
+            const sideSeg = (room.d - CORRIDOR_WIDTH) / 2;
+            addWall(cx + hw + WALL_THICK/2, cz - CORRIDOR_WIDTH/2 - sideSeg/2, WALL_THICK, sideSeg);
+            addWall(cx + hw + WALL_THICK/2, cz + CORRIDOR_WIDTH/2 + sideSeg/2, WALL_THICK, sideSeg);
+            addDoor(cx + hw + WALL_THICK/2, cz, WALL_THICK, CORRIDOR_WIDTH, 'east');
+
+            const corrLen = (STRIDE / 2) - hw;
+            if (corrLen > 0) {
+                const cf = new THREE.Mesh(new THREE.PlaneGeometry(corrLen, CORRIDOR_WIDTH), MATS.floor);
+                cf.rotation.x = -Math.PI / 2;
+                cf.position.set(cx + hw + corrLen/2, 0, cz);
+                scene.add(cf);
+                addWall(cx + hw + corrLen/2, cz - CORRIDOR_WIDTH/2 - WALL_THICK/2, corrLen, WALL_THICK);
+                addWall(cx + hw + corrLen/2, cz + CORRIDOR_WIDTH/2 + WALL_THICK/2, corrLen, WALL_THICK);
+            }
+        } else {
+            addWall(cx + hw + WALL_THICK/2, cz, WALL_THICK, room.d + WALL_THICK*2);
+        }
+
+        room.enemyRefs = [];
+
+        // Spawn Room Contents
+        if (room.type === 'start') {
+            // Vending Machines in Start Room
+            if (Math.random() < 0.5) spawnVendingMachine(cx - 3, cz - 3, 'weapon');
+            if (Math.random() < 0.5) spawnVendingMachine(cx + 3, cz - 3, 'potion');
+        } else if (room.type === 'normal') {
+            const numObstacles = Math.floor(Math.random() * 3) + 2;
+            for(let i=0; i<numObstacles; i++) {
+                const ox = cx + (Math.random() - 0.5) * (room.w - 12);
+                const oz = cz + (Math.random() - 0.5) * (room.d - 12);
+                if (Math.abs(ox - cx) < 5 && Math.abs(oz - cz) < 5) continue;
+                addWall(ox, oz, 2+Math.random()*4, 2+Math.random()*4);
+            }
+
+            // Spikes & Barrels
+            for(let i=0; i<3; i++) {
+                if(Math.random() < 0.4) spawnBarrel(cx + (Math.random()-0.5)*(room.w-8), cz + (Math.random()-0.5)*(room.d-8));
+                if(Math.random() < 0.5) spawnSpike(cx + (Math.random()-0.5)*(room.w-8), cz + (Math.random()-0.5)*(room.d-8));
+            }
+
+            // Enemies - slightly gentler scaling early on
+            const baseEnemies = STATE.floor <= 2 ? 2 : 4;
+            const enemyCount = baseEnemies + STATE.floor + Math.floor(Math.random() * 3);
+            for(let i=0; i<enemyCount; i++) {
+                let ex, ez;
+                let valid = false;
+                let attempts = 0;
+                while (!valid && attempts < 20) {
+                    ex = cx + (Math.random() - 0.5) * (room.w - 4);
+                    ez = cz + (Math.random() - 0.5) * (room.d - 4);
+                    if (!checkCollision(ex, ez, 2.0)) {
+                        valid = true;
+                    }
+                    attempts++;
+                }
+                if (valid) {
+                    let r = Math.random();
+                    let eType = 'basic';
+                    if (STATE.floor >= 2 && r < 0.2) eType = 'fast';
+                    else if (STATE.floor >= 3 && r > 0.8) eType = 'tank';
+                    else if (r > 0.3 && r <= 0.45) eType = 'boar';
+                    else if (r > 0.45 && r <= 0.6) eType = 'slime';
+                    else if (r > 0.6 && r <= 0.75) eType = 'grunt';
+                    else if (r > 0.75 && r <= 0.85) eType = 'turret';
+                    spawnEnemy(ex, ez, eType, room);
+                }
+            }
+        } else if (room.type === 'shop') {
+            room.cleared = true;
+            const itemsToSpawn = Math.floor(Math.random() * 3) + 2; // 2 to 4 items
+            for(let i=0; i<itemsToSpawn; i++) {
+                spawnShopItem(cx + (i - (itemsToSpawn-1)/2)*4, cz, room);
+            }
+        } else if (room.type === 'treasure') {
+            room.cleared = true;
+            spawnChest(cx, cz);
+        } else if (room.type === 'end') {
+            spawnEnemy(cx, cz, 'boss', room);
+        }
+    }
+
+    function spawnBarrel(x, z) {
+        const types = ['red', 'blue', 'green'];
+        const type = types[Math.floor(Math.random() * types.length)];
+        const mat = type === 'red' ? MATS.barrelRed : (type === 'blue' ? MATS.barrelBlue : MATS.barrelGreen);
+        const mesh = new THREE.Mesh(GEOS.barrel, mat);
+        mesh.position.set(x, 0.75, z);
+        mesh.castShadow = true;
+        scene.add(mesh);
+        barrels.push({ mesh, type, hp: 10, active: true });
+    }
+
+    function spawnSpike(x, z) {
+        const mesh = new THREE.Mesh(GEOS.spike, MATS.spike);
+        mesh.position.set(x, 0.5, z);
+        scene.add(mesh);
+        spikes.push({ mesh, lastHit: 0 });
+    }
+
+    function spawnVendingMachine(x, z, type) {
+        const isWeapon = type === 'weapon';
+        const mesh = new THREE.Mesh(GEOS.box, isWeapon ? MATS.vendingW : MATS.vendingP);
+        mesh.scale.set(1.5, 2.5, 1.5);
+        mesh.position.set(x, 1.25, z);
+        mesh.castShadow = true;
+        scene.add(mesh);
+
+        const price = isWeapon ? 15 : 10;
+        const label = isWeapon ? "Random Weapon" : "Random Buff";
+        interactables.push({ mesh, type: 'vending', vmType: type, price, label, active: true });
+    }
+
+    function spawnShopItem(x, z, room) {
+        const types = ['weapon', 'health', 'armor', 'energy'];
+        const t = types[Math.floor(Math.random()*types.length)];
+
+        let mesh, price, label, wIndex = -1;
+        if (t === 'weapon') {
+            wIndex = Math.floor(Math.random() * (WEAPONS.length-1)) + 1;
+            const w = WEAPONS[wIndex];
+            mesh = new THREE.Mesh(GEOS.box, new THREE.MeshStandardMaterial({ color: w.color, emissive: w.color, emissiveIntensity: 0.5 }));
+            mesh.scale.set(0.6, 0.2, 0.6);
+            price = w.rarity.dropWeight < 10 ? 50 : 25;
+            label = w.name;
+        } else if (t === 'health') {
+            mesh = new THREE.Mesh(GEOS.sphere, MATS.enemyFast);
+            mesh.scale.set(0.5,0.5,0.5);
+            price = 15; label = "+2 Health";
+        } else if (t === 'armor') {
+            mesh = new THREE.Mesh(GEOS.box, new THREE.MeshStandardMaterial({color: 0xa0aec0}));
+            mesh.scale.set(0.5,0.5,0.5);
+            price = 20; label = "+1 Max Armor";
+        } else if (t === 'energy') {
+            mesh = new THREE.Mesh(GEOS.sphere, MATS.energy);
+            mesh.scale.set(0.5,0.5,0.5);
+            price = 10; label = "+50 Energy";
+        }
+
+        mesh.position.set(x, 1.0, z);
+        scene.add(mesh);
+
+        const ped = new THREE.Mesh(GEOS.cylinder, MATS.wall);
+        ped.scale.set(0.8, 0.4, 0.8);
+        ped.position.set(x, 0.2, z);
+        scene.add(ped);
+
+        interactables.push({ mesh, type: 'shop', itemType: t, weaponIndex: wIndex, price, label, pedestal: ped });
+    }
+
+    function spawnEnemy(x, z, type, room) {
+        let mesh, hp, speed, fireRate, isBoss = false, mat = MATS.enemy, scale = 1.2;
+        let floorMult = 1 + (STATE.floor * 0.15);
+
+        if (type === 'fast') {
+            mat = MATS.enemyFast; scale = 0.8; hp = 8 * floorMult; speed = 12; fireRate = 800;
+            mesh = new THREE.Mesh(GEOS.octahedron, mat);
+        } else if (type === 'tank') {
+            mat = MATS.enemyTank; scale = 2.0; hp = 40 * floorMult; speed = 4; fireRate = 2000;
+            mesh = new THREE.Mesh(GEOS.box, mat);
+        } else if (type === 'boss') {
+            mat = MATS.enemyBoss; scale = 3.5; hp = 100 * floorMult; speed = 7; fireRate = 600; isBoss = true;
+            mesh = new THREE.Mesh(GEOS.octahedron, mat);
+        } else if (type === 'boar') {
+            mat = MATS.enemyBoar; scale = 1.5; hp = 25 * floorMult; speed = 15; fireRate = 99999;
+            mesh = new THREE.Mesh(GEOS.box, mat);
+        } else if (type === 'grunt') {
+            mat = MATS.enemyGrunt; scale = 1.0; hp = 15 * floorMult; speed = 7; fireRate = 2000;
+            mesh = new THREE.Mesh(GEOS.box, mat);
+        } else if (type === 'slime') {
+            mat = MATS.enemySlime; scale = 1.2; hp = 12 * floorMult; speed = 5; fireRate = 1500;
+            mesh = new THREE.Mesh(GEOS.sphere, mat);
+        } else if (type === 'slime_small') {
+            mat = MATS.enemySlime; scale = 0.6; hp = 5 * floorMult; speed = 10; fireRate = 1000;
+            mesh = new THREE.Mesh(GEOS.sphere, mat);
+        } else if (type === 'turret') {
+            mat = MATS.enemyTurret; scale = 1.5; hp = 30 * floorMult; speed = 0; fireRate = 3000;
+            mesh = new THREE.Mesh(GEOS.cylinder, mat);
+        } else { // basic
+            hp = 12 * floorMult; speed = 8; fireRate = 1200;
+            mesh = new THREE.Mesh(GEOS.box, mat);
+        }
+
+        mesh.scale.set(scale, scale, scale);
+        mesh.position.set(x, scale/2, z);
+        mesh.castShadow = true;
+        scene.add(mesh);
+
+        const enemyObj = {
+            mesh, hp, speed, fireRate, lastFire: 0, isBoss, type, active: false, room: room,
+            freezeTimer: 0, poisonTimer: 0, speedMult: 1,
+            isCharging: false, chargeTimer: 0, chargeDir: null,
+            burstCount: 0, lastBurstTime: 0
+        };
+        enemies.push(enemyObj);
+        if(room) room.enemyRefs.push(enemyObj);
+    }
+
+    function triggerExplosion(x, z, type) {
+        const mesh = new THREE.Mesh(GEOS.sphere, MATS.explosion.clone());
+        if(type==='red' || type==='nuke') mesh.material.color.setHex(0xff4400);
+        if(type==='blue') mesh.material.color.setHex(0x00aaff);
+        if(type==='green') mesh.material.color.setHex(0x00ff00);
+        mesh.position.set(x, 1, z);
+        scene.add(mesh);
+
+        const maxAge = type === 'nuke' ? 1.0 : 0.5;
+        explosions.push({ mesh, type, age: 0, maxAge: maxAge });
+
+        const radius = type === 'nuke' ? 30 : 6;
+        if (player.position.distanceTo(mesh.position) < radius) {
+            if (type==='red') takeDamage(2);
+        }
+        enemies.forEach(e => {
+            if (!e.active) return;
+            if (e.mesh.position.distanceTo(mesh.position) < radius) {
+                if (type==='red') { e.hp -= 30; }
+                if (type==='nuke') { e.hp -= 999; }
+                if (type==='blue') { e.freezeTimer = 3.0; }
+                if (type==='green') { e.poisonTimer = 5.0; }
+            }
+        });
+    }
+
+    function clearScene() {
+        for(let i = scene.children.length - 1; i >= 0; i--) {
+            const obj = scene.children[i];
+            if (obj !== camera && obj !== player && obj.type !== "AmbientLight" && obj.type !== "DirectionalLight") {
+                scene.remove(obj);
+            }
+        }
+        enemies = []; bullets = []; items = []; interactables = []; doors = []; barrels = []; spikes = []; explosions = [];
+    }
+
+    function updatePlayerGun() {
+        const wp = WEAPONS[currentWeaponIndex];
+        playerGun.material.color.setHex(wp.color);
+        playerGun.material.emissive.setHex(wp.color);
+        playerGun.material.emissiveIntensity = wp.isMelee ? 0.8 : 0.4; // Melee weapons glow brighter
+
+        let gw = 0.2, gh = 0.2, gd = 1.0;
+        if (wp.isMelee) { gw = 0.1; gh = 1.5; gd = 0.3; } // Sword shape
+        if (wp.name.includes("Shotgun")) { gw = 0.4; gd = 0.8; }
+        if (wp.name.includes("Sniper") || wp.name.includes("Calibre")) { gd = 2.0; }
+        if (wp.name.includes("Rocket") || wp.name.includes("Cannon")) { gw = 0.5; gh = 0.5; gd = 1.5; }
+
+        playerGun.scale.set(gw, gh, gd);
+
+        if (wp.isMelee) {
+            playerGun.position.set(0.8, 0.7, 0.5); // Hold sword upright
+        } else {
+            playerGun.position.set(0.6, 0.7, gd/2 + 0.4);
+        }
+
+        gunTip.position.set(0.6, 0.7, gd + 0.4);
+    }
+
+    // --- GAME LOGIC ---
+
+    function startGame() {
+        STATE.health = STATE.maxHealth;
+        STATE.armor = STATE.maxArmor;
+        STATE.energy = STATE.maxEnergy;
+        STATE.coins = 0;
+        STATE.floor = 1;
+        STATE.subLevel = 1;
+        STATE.isPaused = false;
+        currentWeaponIndex = 0;
+
+        UI.mainMenu.classList.add('hidden');
+        UI.gameOver.classList.add('hidden');
+        UI.pauseMenu.classList.add('hidden');
+        UI.roomAlert.classList.add('hidden');
+        STATE.isRunning = true;
+
+        generateDungeon();
+    }
+
+    function update(dt) {
+        if (!STATE.isRunning || STATE.isPaused) return;
+
+        if (STATE.armor < STATE.maxArmor) {
+            STATE.armorRegenTimer += dt;
+            if (STATE.armorRegenTimer > 3.0) {
+                STATE.armor++;
+                STATE.armorRegenTimer = 0;
+                updateHUD();
+            }
+        }
+
+        handlePlayerMovement(dt);
+        checkRoomTransition();
+        handleCombat(dt);
+        handleItems();
+        handleInteractions();
+        updateHazards(dt);
+
+        camera.position.x = THREE.MathUtils.lerp(camera.position.x, player.position.x, 0.1);
+        camera.position.z = THREE.MathUtils.lerp(camera.position.z, player.position.z + 18, 0.1);
+
+        drawMinimap();
+    }
+
+    function updateHazards(dt) {
+        const now = Date.now();
+
+        // Spikes
+        spikes.forEach(s => {
+            if (player.position.distanceTo(s.mesh.position) < 1.2 && now - s.lastHit > 1000) {
+                takeDamage(1);
+                s.lastHit = now;
+            }
+            enemies.forEach(e => {
+                if (e.active && e.mesh.position.distanceTo(s.mesh.position) < 1.2 + (e.isBoss?1:0) && now - (e.lastHitSpike||0) > 1000) {
+                    e.hp -= 5;
+                    e.lastHitSpike = now;
+                    e.mesh.material.emissive.setHex(0xffffff);
+                    setTimeout(()=>e.mesh.material.emissive.setHex(0x000000), 50);
+                }
+            });
+        });
+
+        // Explosions
+        for(let i = explosions.length - 1; i >= 0; i--) {
+            let exp = explosions[i];
+            exp.age += dt;
+            let p = exp.age / exp.maxAge;
+            const scaleMax = exp.type === 'nuke' ? 30 : 6;
+            exp.mesh.scale.set(1 + p*scaleMax, 1 + p*scaleMax, 1 + p*scaleMax);
+            exp.mesh.material.opacity = 0.6 * (1 - p);
+            if (exp.age >= exp.maxAge) {
+                scene.remove(exp.mesh);
+                explosions.splice(i, 1);
+            }
+        }
+    }
+
+    function checkRoomTransition() {
+        const gridX = Math.round(player.position.x / STRIDE);
+        const gridZ = Math.round(player.position.z / STRIDE);
+        const key = `${gridX},${gridZ}`;
+
+        if (key !== STATE.activeRoomKey && rooms[key]) {
+            const room = rooms[key];
+            const cx = room.x * STRIDE;
+            const cz = room.z * STRIDE;
+
+            if (Math.abs(player.position.x - cx) < room.w/2 - 1.5 &&
+                Math.abs(player.position.z - cz) < room.d/2 - 1.5) {
+
+                STATE.activeRoomKey = key;
+                room.discovered = true;
+
+                if (!room.cleared) {
+                    lockRoom(room);
+                }
+            }
+        }
+
+        if (STATE.activeRoomKey) {
+            const room = rooms[STATE.activeRoomKey];
+            if (!room.cleared && room.enemiesSpawned) {
+                const alive = room.enemyRefs.filter(e => e.hp > 0);
+                if (alive.length === 0) {
+                    clearRoom(room);
+                }
+            }
+        }
+    }
+
+    function lockRoom(room) {
+        UI.roomAlert.textContent = "DOORS LOCKED";
+        UI.roomAlert.classList.remove('hidden');
+
+        if (room.doorObjects) {
+            room.doorObjects.forEach(d => {
+                d.mesh.material = MATS.doorLocked;
+                doors.push(d.box);
+            });
+        }
+
+        room.enemyRefs.forEach(e => e.active = true);
+        room.enemiesSpawned = true;
+    }
+
+    function clearRoom(room) {
+        room.cleared = true;
+        UI.roomAlert.classList.add('hidden');
+
+        if (room.doorObjects) {
+            room.doorObjects.forEach(d => {
+                d.mesh.material = MATS.doorOpen;
+            });
+        }
+        doors = [];
+
+        if (room.type === 'end') {
+            spawnPortal(room.x * STRIDE, room.z * STRIDE);
+            spawnChest(room.x * STRIDE, room.z * STRIDE - 4, true);
+        }
+    }
+
+    function handlePlayerMovement(dt) {
+        const move = new THREE.Vector3(0,0,0);
+        if (keys.w) move.z -= 1;
+        if (keys.s) move.z += 1;
+        if (keys.a) move.x -= 1;
+        if (keys.d) move.x += 1;
+
+        let currentSpeed = STATE.playerSpeed;
+        if (isShooting && WEAPONS[currentWeaponIndex].slowsPlayer) {
+            currentSpeed = STATE.playerSpeed * 0.4;
+        }
+
+        if (move.lengthSq() > 0) {
+            move.normalize().multiplyScalar(currentSpeed * dt);
+
+            let nx = player.position.x + move.x;
+            if (!checkCollision(nx, player.position.z, 1.4)) player.position.x = nx;
+
+            let nz = player.position.z + move.z;
+            if (!checkCollision(player.position.x, nz, 1.4)) player.position.z = nz;
+        }
+
+        raycaster.setFromCamera(mouse, camera);
+        const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+        raycaster.ray.intersectPlane(plane, lookTarget);
+        if (lookTarget) {
+            const opposite = new THREE.Vector3().subVectors(player.position, lookTarget).add(player.position);
+            player.lookAt(opposite.x, player.position.y, opposite.z);
+        }
+    }
+
+    function checkCollision(px, pz, size) {
+        const box = { x: px, z: pz, w: size, d: size };
+        const hw = box.w/2, hd = box.d/2;
+
+        for (let w of walls) {
+            if (Math.abs(box.x - w.box.x) < (hw + w.box.w/2) && Math.abs(box.z - w.box.z) < (hd + w.box.d/2)) return true;
+        }
+        for (let w of doors) {
+            if (Math.abs(box.x - w.x) < (hw + w.w/2) && Math.abs(box.z - w.z) < (hd + w.d/2)) return true;
+        }
+        return false;
+    }
+
+    function handleCombat(dt) {
+        const wp = WEAPONS[currentWeaponIndex];
+        const now = Date.now();
+
+        // Groundwater logic: bypass fireRate if it's a fresh click
+        let canFire = (now - lastFireTime > wp.fireRate);
+        if (wp.groundwater && clickTriggered) {
+            canFire = true;
+        }
+
+        if (isShooting && canFire) {
+            if (STATE.energy >= wp.energy) {
+                STATE.energy -= wp.energy;
+                lastFireTime = now;
+                clickTriggered = false; // consume click
+                updateHUD();
+
+                const origin = new THREE.Vector3();
+                gunTip.getWorldPosition(origin);
+
+                // Auto-aim Feature
+                let aimTarget = lookTarget.clone();
+                let closestDist = 6.0;
+                let targetEnemy = null;
+
+                for (let e of enemies) {
+                    if (!e.active || e.hp <= 0) continue;
+                    const distToMouse = Math.sqrt(Math.pow(e.mesh.position.x - lookTarget.x, 2) + Math.pow(e.mesh.position.z - lookTarget.z, 2));
+                    if (distToMouse < closestDist) {
+                        closestDist = distToMouse;
+                        targetEnemy = e;
+                    }
+                }
+
+                if (targetEnemy) aimTarget = targetEnemy.mesh.position.clone();
+
+                const targetDir = new THREE.Vector3().subVectors(aimTarget, player.position);
+                targetDir.y = 0;
+                targetDir.normalize();
+
+                // Melee Weapon Logic
+                if (wp.isMelee) {
+                    // Sweep animation
+                    playerGun.rotation.y = -Math.PI/2;
+                    setTimeout(()=> playerGun.rotation.y = 0, 100);
+
+                    // Invisible short-lived massive bullet
+                    spawnBullet(origin, targetDir, 1, wp.damage, true, wp.color, 4.0, {
+                        duration: wp.duration,
+                        pierce: true,
+                        element: wp.element,
+                        isMelee: true
+                    });
+                } else if (wp.nuke) {
+                    triggerExplosion(player.position.x, player.position.z, 'nuke');
+                    // Remove Super Buddy after 1 use
+                    currentWeaponIndex = 0; // fallback to bad pistol
+                    updatePlayerGun();
+                } else {
+                    for(let i=0; i<wp.count; i++) {
+                        let angle = (Math.random() - 0.5) * wp.spread;
+                        if (wp.count > 1) angle = ((i/(wp.count-1)) - 0.5) * wp.spread;
+
+                        const dir = targetDir.clone().applyAxisAngle(new THREE.Vector3(0,1,0), angle);
+                        spawnBullet(origin, dir, wp.speed, wp.damage, true, wp.color, wp.scale || 1, {
+                            pierce: wp.pierce,
+                            element: wp.element,
+                            explode: wp.explode,
+                            homing: wp.homing
+                        });
+                    }
+                }
+                if (!wp.auto && !wp.groundwater) isShooting = false;
+            } else {
+                UI.energyFill.style.background = '#ffffff';
+                setTimeout(() => UI.energyFill.style.background = '#3182ce', 100);
+                isShooting = false; // Stop auto if out of energy
+            }
+        }
+
+        // Update Bullets
+        for (let i = bullets.length - 1; i >= 0; i--) {
+            const b = bullets[i];
+            b.age += dt;
+
+            // Homing Logic
+            if (b.opts.homing && b.isPlayer) {
+                let closestDist = 15;
+                let targetEnemy = null;
+                for (let e of enemies) {
+                    if (!e.active || e.hp <= 0) continue;
+                    const d = b.mesh.position.distanceTo(e.mesh.position);
+                    if (d < closestDist) {
+                        closestDist = d;
+                        targetEnemy = e;
+                    }
+                }
+                if (targetEnemy) {
+                    const desiredDir = new THREE.Vector3().subVectors(targetEnemy.mesh.position, b.mesh.position).normalize().setY(0);
+                    b.dir.lerp(desiredDir, 0.1).normalize();
+                }
+            }
+
+            b.mesh.position.addScaledVector(b.dir, b.speed * dt);
+
+            let hit = false;
+            let removeBullet = false;
+            const bx = b.mesh.position.x, bz = b.mesh.position.z;
+
+            // duration logic (Melee sweeps)
+            if (b.opts.duration && b.age > b.opts.duration) {
+                removeBullet = true;
+            }
+
+            if (!removeBullet && checkCollision(bx, bz, b.opts.isMelee ? 1.0 : 0.4)) {
+                hit = true;
+                if (!b.opts.pierce) removeBullet = true;
+                if (b.opts.explode) triggerExplosion(bx, bz, 'red');
+            }
+
+            if (!hit && !removeBullet) {
+                // Check Barrels
+                for (let j = barrels.length - 1; j >= 0; j--) {
+                    let bar = barrels[j];
+                    if (new THREE.Vector2(bx - bar.mesh.position.x, bz - bar.mesh.position.z).lengthSq() < 1.5) {
+                        bar.hp -= b.damage;
+                        hit = true;
+                        if(!b.opts.pierce) removeBullet = true;
+
+                        bar.mesh.material.emissive.setHex(0xffffff);
+                        setTimeout(()=> {if(bar.mesh) bar.mesh.material.emissive.setHex(0x000000)}, 50);
+                        if (bar.hp <= 0 && bar.active) {
+                            bar.active = false;
+                            scene.remove(bar.mesh);
+                            triggerExplosion(bar.mesh.position.x, bar.mesh.position.z, bar.type);
+                            barrels.splice(j, 1);
+                        }
+                        break;
+                    }
+                }
+            }
+
+            if (!hit && !removeBullet) {
+                if (b.isPlayer) {
+                    for (let j = enemies.length - 1; j >= 0; j--) {
+                        const e = enemies[j];
+                        if (!e.active || b.hitEntities.has(e)) continue; // ignore inactive, or already hit (for pierce)
+
+                        const hitRadSq = (b.opts.isMelee ? 4.0 : 1.0) * (e.isBoss ? 4.0 : (e.type === 'tank' ? 2.5 : 1.5));
+                        if (new THREE.Vector2(bx - e.mesh.position.x, bz - e.mesh.position.z).lengthSq() < hitRadSq) {
+                            e.hp -= b.damage;
+                            hit = true;
+                            if (!b.opts.pierce) removeBullet = true;
+                            b.hitEntities.add(e);
+
+                            // Elements
+                            if (b.opts.element === 'freeze') e.freezeTimer = 2.0;
+                            if (b.opts.element === 'fire') { e.poisonTimer = 3.0; e.mesh.material.emissive.setHex(0xffaa00); } // Re-use poison tick for fire DoT
+                            if (b.opts.element === 'poison') e.poisonTimer = 5.0;
+
+                            if (b.opts.explode) triggerExplosion(bx, bz, 'red');
+
+                            e.mesh.material.emissive.setHex(0xffffff);
+                            setTimeout(() => {
+                                if(e.mesh && e.freezeTimer<=0 && e.poisonTimer<=0) e.mesh.material.emissive.setHex(0x000000);
+                            }, 50);
+
+                            if (e.hp <= 0) {
+                                if (e.type === 'slime') {
+                                    spawnEnemy(e.mesh.position.x - 1, e.mesh.position.z, 'slime_small', e.room);
+                                    spawnEnemy(e.mesh.position.x + 1, e.mesh.position.z, 'slime_small', e.room);
+                                    e.room.enemyRefs.forEach(er => { if(er.type==='slime_small') er.active = true; });
+                                }
+                                spawnDrops(e.mesh.position.x, e.mesh.position.z, e.isBoss ? 10 : 2);
+                                scene.remove(e.mesh);
+                                enemies.splice(j, 1);
+                            }
+                            break;
+                        }
+                    }
+                } else {
+                    if (new THREE.Vector2(bx - player.position.x, bz - player.position.z).lengthSq() < 1.5) {
+                        takeDamage(b.damage);
+                        hit = true;
+                        removeBullet = true;
+                    }
+                }
+            }
+
+            if (removeBullet || Math.abs(bx) > 500 || Math.abs(bz) > 500) {
+                scene.remove(b.mesh);
+                bullets.splice(i, 1);
+            }
+        }
+
+        // Update Enemies
+        enemies.forEach(e => {
+            // Status effects
+            if (e.freezeTimer > 0) {
+                e.freezeTimer -= dt;
+                e.speedMult = 0;
+                e.mesh.material.emissive.setHex(0x0000ff);
+            } else if (e.poisonTimer > 0) {
+                e.poisonTimer -= dt;
+                e.speedMult = 1;
+                // Retain original emissive if fire, else green
+                if(e.mesh.material.emissive.getHex() !== 0xffaa00) e.mesh.material.emissive.setHex(0x00ff00);
+                if (Math.random() < 0.05) e.hp -= 1; // DoT
+                if (e.hp <= 0) {
+                    spawnDrops(e.mesh.position.x, e.mesh.position.z, e.isBoss ? 10 : 2);
+                    scene.remove(e.mesh);
+                    enemies.splice(enemies.indexOf(e), 1);
+                    return;
+                }
+            } else {
+                e.speedMult = 1;
+                e.mesh.material.emissive.setHex(0x000000);
+            }
+
+            if (!e.active) {
+                if (!e.wanderAngle || Math.random() < 0.02) {
+                    e.wanderAngle = Math.random() * Math.PI * 2;
+                    e.isWandering = Math.random() < 0.5;
+                }
+                if (e.isWandering && e.speedMult > 0 && e.type !== 'turret') {
+                    let wx = e.mesh.position.x + Math.cos(e.wanderAngle) * (e.speed * 0.3) * dt;
+                    let wz = e.mesh.position.z + Math.sin(e.wanderAngle) * (e.speed * 0.3) * dt;
+
+                    const roomX = e.room.x * STRIDE;
+                    const roomZ = e.room.z * STRIDE;
+                    if (Math.abs(wx - roomX) < e.room.w/2 - 1.5) e.mesh.position.x = wx;
+                    if (Math.abs(wz - roomZ) < e.room.d/2 - 1.5) e.mesh.position.z = wz;
+
+                    e.mesh.rotation.y = -e.wanderAngle + Math.PI/2;
+                }
+                return;
+            }
+
+            const dist = player.position.distanceTo(e.mesh.position);
+            const origin = e.mesh.position.clone().setY(0.7);
+            const dir = new THREE.Vector3().subVectors(player.position, origin).normalize().setY(0);
+
+            // Turret Logic
+            if (e.type === 'turret') {
+                if (e.speedMult > 0 && now - e.lastFire > e.fireRate) {
+                    e.lastFire = now;
+                    let floorDmg = 1 + Math.floor(STATE.floor / 3);
+                    for(let i=0; i<8; i++) {
+                        let angle = (i/8) * Math.PI * 2;
+                        let tdir = new THREE.Vector3(Math.cos(angle), 0, Math.sin(angle));
+                        spawnBullet(origin, tdir, 12, 2 * floorDmg, false, 0xffaa00, 1.2, {});
+                    }
+                }
+                return;
+            }
+
+            // Boar Charge Logic
+            if (e.type === 'boar') {
+                if (!e.isCharging && dist < 12 && e.speedMult > 0) {
+                    e.isCharging = true;
+                    e.chargeDir = dir.clone();
+                    e.chargeTimer = 1.5;
+                }
+                if (e.isCharging) {
+                    e.chargeTimer -= dt;
+                    let nx = e.mesh.position.x + e.chargeDir.x * e.speed * 2.5 * dt * e.speedMult;
+                    let nz = e.mesh.position.z + e.chargeDir.z * e.speed * 2.5 * dt * e.speedMult;
+                    if (checkCollision(nx, nz, 1.5)) {
+                        e.isCharging = false;
+                        e.freezeTimer = 2.0; // Stun on wall hit
+                    } else {
+                        e.mesh.position.x = nx; e.mesh.position.z = nz;
+                    }
+
+                    // Melee hit player
+                    if (dist < 2.0 && now - e.lastFire > 500) {
+                        takeDamage(1 + Math.floor(STATE.floor/2));
+                        e.lastFire = now;
+                    }
+
+                    if (e.chargeTimer <= 0) e.isCharging = false;
+                    e.mesh.lookAt(player.position);
+                    return;
+                }
+            }
+
+            // Standard/Grunt Movement
+            if (dist > 3) {
+                let moveDir = dir.clone();
+
+                if (e.type === 'grunt') {
+                    moveDir = new THREE.Vector3(-dir.z, 0, dir.x); // Strafe
+                    if (dist > 15) moveDir.add(dir);
+                }
+
+                let sepX = 0, sepZ = 0;
+                const myRad = e.isBoss ? 1.5 : (e.type === 'tank' ? 1.0 : (e.type === 'fast' ? 0.4 : 0.6));
+                for (let other of enemies) {
+                    if (other === e || !other.active) continue;
+                    let dx = e.mesh.position.x - other.mesh.position.x;
+                    let dz = e.mesh.position.z - other.mesh.position.z;
+                    let distSq = dx*dx + dz*dz;
+                    let otherRad = other.isBoss ? 1.5 : (other.type === 'tank' ? 1.0 : (other.type === 'fast' ? 0.4 : 0.6));
+                    let minDist = myRad + otherRad + 0.2;
+
+                    if (distSq < minDist*minDist && distSq > 0.001) {
+                        let d = Math.sqrt(distSq);
+                        let push = (minDist - d) / d;
+                        sepX += dx * push * 5;
+                        sepZ += dz * push * 5;
+                    }
+                }
+
+                let nx = e.mesh.position.x + (moveDir.x * e.speed + sepX) * dt * e.speedMult;
+                let nz = e.mesh.position.z + (moveDir.z * e.speed + sepZ) * dt * e.speedMult;
+
+                const colSize = e.isBoss ? 2.5 : (e.type === 'tank' ? 1.8 : 1.0);
+                if (!checkCollision(nx, e.mesh.position.z, colSize)) e.mesh.position.x = nx;
+                if (!checkCollision(e.mesh.position.x, nz, colSize)) e.mesh.position.z = nz;
+
+                e.mesh.lookAt(player.position);
+            } else if (e.type === 'slime_small' && now - e.lastFire > 500) {
+                // small slimes do melee
+                takeDamage(1);
+                e.lastFire = now;
+            }
+
+            // Grunt Burst Fire
+            if (e.type === 'grunt' && e.speedMult > 0) {
+                if (now - e.lastFire > e.fireRate) {
+                    e.lastFire = now;
+                    e.burstCount = 3;
+                }
+                if (e.burstCount > 0 && now - e.lastBurstTime > 150) {
+                    e.lastBurstTime = now;
+                    e.burstCount--;
+                    let floorDmg = 1 + Math.floor(STATE.floor / 3);
+                    spawnBullet(origin, dir, 20, 1 * floorDmg, false, 0x4ade80, 0.8, {});
+                }
+                return;
+            }
+
+            // Other firing
+            if (dist < 18 && now - e.lastFire > e.fireRate && e.speedMult > 0 && e.type !== 'boar' && e.type !== 'slime_small') {
+                e.lastFire = now;
+                let floorDmg = 1 + Math.floor(STATE.floor / 3);
+
+                if (e.isBoss) {
+                    for(let i=0; i<5; i++) {
+                        const spreadDir = dir.clone().applyAxisAngle(new THREE.Vector3(0,1,0), (i-2)*0.2);
+                        spawnBullet(origin, spreadDir, 15, 2 * floorDmg, false, 0x805ad5, 1.5, {});
+                    }
+                } else if (e.type === 'tank') {
+                    for(let i=0; i<3; i++) {
+                        const spreadDir = dir.clone().applyAxisAngle(new THREE.Vector3(0,1,0), (i-1)*0.3);
+                        spawnBullet(origin, spreadDir, 12, 3 * floorDmg, false, 0xff5500, 1.2, {});
+                    }
+                } else if (e.type === 'fast' || e.type === 'slime') {
+                    spawnBullet(origin, dir, 25, 1 * floorDmg, false, 0xffaa00, 0.8, {});
+                } else {
+                    spawnBullet(origin, dir, 18, 1 * floorDmg, false, 0xff0000, 1, {});
+                }
+            }
+        });
+    }
+
+    function spawnBullet(pos, dir, speed, damage, isPlayer, color, scale, opts) {
+        let mat = isPlayer ? MATS.bullet : MATS.enemy;
+        if(opts.isMelee) mat = MATS.meleeSwoosh;
+
+        const mesh = new THREE.Mesh(GEOS.sphere, mat.clone());
+        if(isPlayer && !opts.isMelee) mesh.material.color.setHex(color);
+
+        mesh.scale.set(scale*0.3, scale*0.3, scale*0.3);
+        mesh.position.copy(pos);
+        scene.add(mesh);
+        bullets.push({ mesh, dir, speed, damage, isPlayer, age: 0, opts, hitEntities: new Set() });
+    }
+
+    function spawnDrops(x, z, count) {
+        for(let i=0; i<count; i++) {
+            const isEnergy = Math.random() < 0.4;
+            const mesh = new THREE.Mesh(GEOS.box, isEnergy ? MATS.energy : MATS.coin);
+            mesh.scale.set(0.6, 0.6, 0.6);
+            mesh.position.set(x + (Math.random()-0.5)*2, 0.3, z + (Math.random()-0.5)*2);
+            scene.add(mesh);
+            items.push({ mesh, type: isEnergy ? 'energy' : 'coin', value: isEnergy ? 15 : 5 });
+        }
+    }
+
+    function handleItems() {
+        for (let i = items.length - 1; i >= 0; i--) {
+            const item = items[i];
+            item.mesh.rotation.y += 0.05;
+
+            if (player.position.distanceTo(item.mesh.position) < 2.0) {
+                if (item.type === 'coin') STATE.coins += item.value;
+                if (item.type === 'energy') STATE.energy = Math.min(STATE.maxEnergy, STATE.energy + item.value);
+
+                scene.remove(item.mesh);
+                items.splice(i, 1);
+                updateHUD();
+            }
+        }
+    }
+
+    function spawnChest(x, z, isBossDrop = false) {
+        const mesh = new THREE.Mesh(GEOS.box, MATS.chest);
+        mesh.scale.set(1.5, 1, 1.5);
+        mesh.position.set(x, 0.5, z);
+        scene.add(mesh);
+
+        let pool = WEAPONS.slice(1);
+        let wIndex = 1;
+
+        if (isBossDrop) {
+            pool = pool.filter(w => w.rarity === RARITY.RARE || w.rarity === RARITY.EPIC || w.rarity === RARITY.LEGENDARY);
+            wIndex = pool[Math.floor(Math.random() * pool.length)].id;
+        } else {
+            const weightPool = [];
+            pool.forEach(w => {
+                for(let i=0; i<w.rarity.dropWeight; i++) weightPool.push(w.id);
+            });
+            wIndex = weightPool[Math.floor(Math.random() * weightPool.length)];
+        }
+
+        interactables.push({ mesh, type: 'chest', weaponIndex: wIndex });
+    }
+
+    function spawnWeaponDrop(x, z, weaponIndex) {
+        const w = WEAPONS[weaponIndex];
+        const mesh = new THREE.Mesh(GEOS.box, new THREE.MeshStandardMaterial({ color: w.color, emissive: w.color, emissiveIntensity: 0.5 }));
+        mesh.scale.set(0.6, 0.2, 0.6);
+        mesh.position.set(x, 0.3, z);
+        scene.add(mesh);
+
+        interactables.push({ mesh, type: 'weaponDrop', weaponIndex: weaponIndex });
+    }
+
+    function spawnPortal(x, z) {
+        const mesh = new THREE.Mesh(GEOS.cylinder, MATS.portal);
+        mesh.scale.set(2, 0.2, 2);
+        mesh.position.set(x, 0.1, z);
+        scene.add(mesh);
+        interactables.push({ mesh, type: 'portal' });
+    }
+
+    function handleInteractions() {
+        let canInteract = null;
+
+        for (let i = interactables.length - 1; i >= 0; i--) {
+            const int = interactables[i];
+            // Ensure Vending Machines only work while active
+            if (int.type === 'vending' && !int.active) continue;
+
+            if (player.position.distanceTo(int.mesh.position) < 3.0) {
+                canInteract = int;
+                break;
+            }
+        }
+
+        if (canInteract) {
+            UI.prompt.classList.remove('hidden');
+            if (canInteract.type === 'chest' || canInteract.type === 'weaponDrop') {
+                UI.promptMain.textContent = `Press [E] to take ${WEAPONS[canInteract.weaponIndex].name}`;
+                UI.promptSub.textContent = '';
+            } else if (canInteract.type === 'shop' || canInteract.type === 'vending') {
+                UI.promptMain.textContent = `Press [E] to buy ${canInteract.label}`;
+                UI.promptSub.textContent = `Cost: ${canInteract.price} 💰`;
+            } else if (canInteract.type === 'portal') {
+                UI.promptMain.textContent = `Press [E] to descend`;
+                UI.promptSub.textContent = '';
+            }
+
+            if (keys.e) {
+                keys.e = false;
+
+                if (canInteract.type === 'shop' || canInteract.type === 'vending') {
+                    if (STATE.coins >= canInteract.price) {
+                        STATE.coins -= canInteract.price;
+
+                        if (canInteract.type === 'vending') {
+                            canInteract.active = false;
+                            canInteract.mesh.material.emissiveIntensity = 0; // Turn off
+
+                            if (canInteract.vmType === 'weapon') {
+                                const pool = [];
+                                WEAPONS.slice(1).forEach(w => { for(let i=0; i<w.rarity.dropWeight; i++) pool.push(w.id); });
+                                const wIndex = pool[Math.floor(Math.random() * pool.length)];
+                                spawnWeaponDrop(canInteract.mesh.position.x, canInteract.mesh.position.z + 3, wIndex);
+                            } else {
+                                // Potion machine logic
+                                const buff = Math.random();
+                                if (buff < 0.3) { STATE.maxHealth += 2; STATE.health += 2; }
+                                else if (buff < 0.6) { STATE.maxArmor++; STATE.armor++; }
+                                else { STATE.maxEnergy += 50; STATE.energy += 50; }
+                            }
+                        } else {
+                            // Regular shop item logic
+                            if (canInteract.itemType === 'weapon') {
+                                const oldW = currentWeaponIndex;
+                                currentWeaponIndex = canInteract.weaponIndex;
+                                spawnWeaponDrop(player.position.x, player.position.z, oldW);
+                                updatePlayerGun();
+                            } else if (canInteract.itemType === 'health') {
+                                STATE.health = Math.min(STATE.maxHealth, STATE.health + 2);
+                            } else if (canInteract.itemType === 'armor') {
+                                STATE.maxArmor++; STATE.armor++;
+                            } else if (canInteract.itemType === 'energy') {
+                                STATE.energy = Math.min(STATE.maxEnergy, STATE.energy + 50);
+                            }
+                            scene.remove(canInteract.mesh);
+                            if(canInteract.pedestal) scene.remove(canInteract.pedestal);
+                            interactables.splice(interactables.indexOf(canInteract), 1);
+                        }
+                    } else {
+                        UI.roomAlert.textContent = "NOT ENOUGH COINS!";
+                        UI.roomAlert.classList.remove('hidden');
+                        setTimeout(()=>UI.roomAlert.classList.add('hidden'), 1000);
+                    }
+                } else if (canInteract.type === 'chest' || canInteract.type === 'weaponDrop') {
+                    const oldWeaponIndex = currentWeaponIndex;
+                    currentWeaponIndex = canInteract.weaponIndex;
+                    spawnWeaponDrop(player.position.x, player.position.z, oldWeaponIndex);
+                    scene.remove(canInteract.mesh);
+                    interactables.splice(interactables.indexOf(canInteract), 1);
+                    updatePlayerGun();
+                } else if (canInteract.type === 'portal') {
+                    STATE.subLevel++;
+                    if (STATE.subLevel > STATE.maxSubLevels) {
+                        STATE.subLevel = 1; STATE.floor++;
+                    }
+                    generateDungeon();
+                }
+                updateHUD();
+            }
+        } else {
+            UI.prompt.classList.add('hidden');
+        }
+    }
+
+    function takeDamage(amt) {
+        STATE.armorRegenTimer = 0;
+        if (STATE.armor > 0) {
+            const absorb = Math.min(STATE.armor, amt);
+            STATE.armor -= absorb;
+            amt -= absorb;
+        }
+        if (amt > 0) {
+            STATE.health -= amt;
+            document.body.style.backgroundColor = 'red';
+            setTimeout(() => document.body.style.backgroundColor = '#000', 50);
+        }
+
+        updateHUD();
+        if (STATE.health <= 0) {
+            STATE.isRunning = false;
+            UI.gameOver.classList.remove('hidden');
+        }
+    }
+
+    // --- UI UPDATES ---
+
+    function updateHUD() {
+        UI.healthFill.style.width = `${Math.max(0, (STATE.health/STATE.maxHealth)*100)}%`;
+        UI.healthText.textContent = `${Math.ceil(Math.max(0, STATE.health))} / ${STATE.maxHealth}`;
+
+        UI.armorFill.style.width = `${Math.max(0, (STATE.armor/STATE.maxArmor)*100)}%`;
+        UI.armorText.textContent = `${Math.ceil(Math.max(0, STATE.armor))} / ${STATE.maxArmor}`;
+
+        UI.energyFill.style.width = `${Math.max(0, (STATE.energy/STATE.maxEnergy)*100)}%`;
+        UI.energyText.textContent = `${Math.ceil(Math.max(0, STATE.energy))} / ${STATE.maxEnergy}`;
+
+        UI.coinText.textContent = STATE.coins;
+        UI.levelDisplay.textContent = `${STATE.floor} - ${STATE.subLevel}`;
+
+        const wp = WEAPONS[currentWeaponIndex];
+        UI.weaponName.textContent = wp.name;
+        UI.weaponName.style.color = wp.rarity.color !== 0xffffff ? '#' + wp.color.toString(16) : '#fff';
+        UI.weaponCost.innerHTML = `${wp.energy} <svg class="w-3 h-3 inline-block" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M11.3 1.046A1 1 0 0112 2v5h4a1 1 0 01.82 1.573l-7 10A1 1 0 018 18v-5H4a1 1 0 01-.82-1.573l7-10a1 1 0 011.12-.381z" clip-rule="evenodd" /></svg>`;
+        UI.weaponIcon.innerHTML = wp.icon;
+    }
+
+    function drawMinimap() {
+        const ctx = UI.ctx;
+        ctx.clearRect(0, 0, 160, 160);
+
+        const scale = 1.5;
+        const cx = 80; const cz = 80;
+        const px = player.position.x;
+        const pz = player.position.z;
+
+        roomList.forEach(r => {
+            if (!r.discovered) return;
+
+            const rx = cx + (r.x * STRIDE - px) * scale;
+            const rz = cz + (r.z * STRIDE - pz) * scale;
+
+            const rw = r.w * scale;
+            const rd = r.d * scale;
+
+            if (r.type === 'shop') ctx.fillStyle = '#ecc94b';
+            else if (r.type === 'treasure') ctx.fillStyle = '#38b2ac';
+            else if (r.type === 'start') ctx.fillStyle = '#276749';
+            else if (r.type === 'end') ctx.fillStyle = '#553c9a';
+            else ctx.fillStyle = '#2d3748';
+
+            if (STATE.activeRoomKey === `${r.x},${r.z}`) ctx.fillStyle = '#4a5568';
+
+            ctx.fillRect(rx - rw/2, rz - rd/2, rw, rd);
+
+            if (r.type === 'shop' || r.type === 'treasure') {
+                ctx.fillStyle = '#000';
+                ctx.font = 'bold 16px sans-serif';
+                ctx.fillText('!', rx - 4, rz + 6);
+            }
+
+            ctx.fillStyle = '#1a202c';
+            if (r.doors.east) ctx.fillRect(rx + rw/2, rz - (CORRIDOR_WIDTH*scale)/2, (STRIDE/2 - r.w/2)*scale, CORRIDOR_WIDTH*scale);
+            if (r.doors.south) ctx.fillRect(rx - (CORRIDOR_WIDTH*scale)/2, rz + rd/2, CORRIDOR_WIDTH*scale, (STRIDE/2 - r.d/2)*scale);
+
+            if (!r.cleared) {
+                ctx.fillStyle = '#e53e3e';
+                ctx.beginPath(); ctx.arc(rx, rz, 3, 0, Math.PI*2); ctx.fill();
+            }
+        });
+
+        ctx.fillStyle = '#4299e1';
+        ctx.beginPath(); ctx.arc(cx, cz, 4, 0, Math.PI*2); ctx.fill();
+    }
+
+    function animate() {
+        requestAnimationFrame(animate);
+        const dt = Math.min(clock.getDelta(), 0.1);
+        update(dt);
+        renderer.render(scene, camera);
+    }
+
+    window.onload = init;
+</script>
+</body>
+</html>
