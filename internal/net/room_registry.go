@@ -14,6 +14,7 @@ type Room struct {
 	code    string
 	hostID  string
 	players map[*ClientConn]struct{}
+	ready   map[*ClientConn]bool
 }
 
 type RoomRegistry struct {
@@ -46,6 +47,7 @@ func (rr *RoomRegistry) CreateRoom(client *ClientConn) (*Room, error) {
 		code:    code,
 		hostID:  client.id,
 		players: map[*ClientConn]struct{}{client: {}},
+		ready:   map[*ClientConn]bool{client: false},
 	}
 	rr.rooms[code] = room
 	rr.clientToRoom[client] = code
@@ -75,7 +77,30 @@ func (rr *RoomRegistry) JoinRoom(client *ClientConn, code string) (*Room, error)
 	}
 
 	room.players[client] = struct{}{}
+	room.ready[client] = false
 	rr.clientToRoom[client] = code
+	return room, nil
+}
+
+func (rr *RoomRegistry) SetReady(client *ClientConn, ready bool) (*Room, error) {
+	rr.mu.Lock()
+	defer rr.mu.Unlock()
+
+	code, ok := rr.clientToRoom[client]
+	if !ok {
+		return nil, fmt.Errorf("not in a room")
+	}
+
+	room, ok := rr.rooms[code]
+	if !ok {
+		delete(rr.clientToRoom, client)
+		return nil, fmt.Errorf("room not found")
+	}
+	if _, exists := room.players[client]; !exists {
+		return nil, fmt.Errorf("not in room")
+	}
+
+	room.ready[client] = ready
 	return room, nil
 }
 
@@ -114,8 +139,10 @@ func (rr *RoomRegistry) RoomStatePayload(room *Room) map[string]interface{} {
 	defer rr.mu.Unlock()
 
 	players := make([]string, 0, len(room.players))
+	readyByPlayer := make(map[string]bool, len(room.players))
 	for c := range room.players {
 		players = append(players, c.id)
+		readyByPlayer[c.id] = room.ready[c]
 	}
 	sort.Strings(players)
 
@@ -124,6 +151,7 @@ func (rr *RoomRegistry) RoomStatePayload(room *Room) map[string]interface{} {
 		"hostId":     room.hostID,
 		"maxPlayers": maxRoomPlayers,
 		"players":    players,
+		"ready":      readyByPlayer,
 	}
 }
 
@@ -140,6 +168,7 @@ func (rr *RoomRegistry) leaveRoomLocked(client *ClientConn) *Room {
 	}
 
 	delete(room.players, client)
+	delete(room.ready, client)
 	delete(rr.clientToRoom, client)
 
 	if len(room.players) == 0 {
@@ -181,4 +210,3 @@ func (rr *RoomRegistry) generateRoomCodeLocked() (string, error) {
 
 	return "", fmt.Errorf("failed to allocate unique room code")
 }
-
