@@ -1,6 +1,7 @@
 package main
 
 import (
+	netproto "dungeon/internal/net"
 	"encoding/json"
 	"log"
 	"net/http"
@@ -10,6 +11,9 @@ import (
 func main() {
 	mux := http.NewServeMux()
 	fileServer := http.FileServer(http.Dir("."))
+	hub := netproto.NewHub()
+
+	go hub.Run()
 
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
@@ -33,6 +37,14 @@ func main() {
 		}
 
 		fileServer.ServeHTTP(w, r)
+	})
+
+	mux.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		netproto.ServeWS(hub, w, r)
 	})
 
 	port := os.Getenv("PORT")
